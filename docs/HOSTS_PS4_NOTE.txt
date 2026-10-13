@@ -1,0 +1,16 @@
+# shadPS4 host_overrides.json ya creado en:
+# %APPDATA%\shadPS4\host_overrides.json
+# <shadPS4_folder>\user\host_overrides.json
+# Contenido mapea lavender-ps4-auth3 -> http://127.0.0.1:8080 (bypass TLS)
+# y lobby/stun -> 127.0.0.1 via parche net_util.cpp
+# Si usas binario precompilado sin parche, añade a C:\Windows\System32\drivers\etc\hosts:
+# 127.0.0.1 lavender-ps4-auth3.prod.demonware.net
+# 127.0.0.1 lavender-ps4-auth3.cert.demonware.net
+# 127.0.0.1 lavender-ps4-auth3.dev.demonware.net
+# 127.0.0.1 lavender-ps4-lobby.prod.demonware.net
+# 127.0.0.1 lavender-ps4-lobby.cert.demonware.net
+# 127.0.0.1 lavender-ps4-lobby.dev.demonware.net
+# 127.0.0.1 stun.us.demonware.net
+# 127.0.0.1 stun.eu.demonware.net
+# 127.0.0.1 stun.jp.demonware.net
+# 127.0.0.1 stun.au.demonware.net
