@@ -420,7 +420,7 @@ const migratePort uint16 = 3074
 var migrateEnabled = os.Getenv("CTR_MIGRATE") == "1"
 
 func migrateIP() net.IP {
-	ip := net.ParseIP(nextendoHost).To4()
+	ip := resolveHostIPv4(nextendoHost)
 	if ip == nil {
 		ip = net.IPv4(127, 0, 0, 1).To4()
 	}

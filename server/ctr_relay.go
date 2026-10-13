@@ -89,7 +89,7 @@ var relay = &relayTable{pairs: map[string]*relayPair{}, byPort: map[int]*relayPa
 func relayEnabled() bool { return relay.high >= relay.low && relay.low > 0 }
 
 func startCTRRelay(low, high int, host string) {
-	ip := net.ParseIP(host).To4()
+	ip := resolveHostIPv4(host)
 	if ip == nil || low <= 0 || high < low {
 		log.Printf("[CTR Relay] disabled (host=%q ports %d-%d)", host, low, high)
 		return

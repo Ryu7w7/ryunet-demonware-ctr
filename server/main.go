@@ -12,6 +12,7 @@ package main
 
 import (
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -62,6 +63,21 @@ func resolveCertPath(key, def string) string {
 		return filepath.Join("certs", val)
 	}
 	return val
+}
+
+func resolveHostIPv4(host string) net.IP {
+	if ip := net.ParseIP(host).To4(); ip != nil {
+		return ip
+	}
+	ips, err := net.LookupIP(host)
+	if err == nil {
+		for _, ip := range ips {
+			if v4 := ip.To4(); v4 != nil {
+				return v4
+			}
+		}
+	}
+	return nil
 }
 
 func envOrInt(key string, def int) int {

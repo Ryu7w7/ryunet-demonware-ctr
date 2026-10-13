@@ -50,9 +50,9 @@ func serveNAT(port int) {
 		log.Printf("[RyuNET NAT] udp %d unavailable: %v", port, err)
 		return
 	}
-	serverIP := net.ParseIP(nextendoHost).To4()
+	serverIP := resolveHostIPv4(nextendoHost)
 	if serverIP == nil {
-		log.Printf("[RyuNET NAT] RYUNET_HOST=%q is not an IPv4 address: announcing 127.0.0.1", nextendoHost)
+		log.Printf("[RyuNET NAT] RYUNET_HOST=%q could not be resolved to an IPv4 address: announcing 127.0.0.1", nextendoHost)
 		serverIP = net.IPv4(127, 0, 0, 1).To4()
 	}
 	log.Printf("[RyuNET NAT] listening UDP %d (announced server ip %s)", port, serverIP)
