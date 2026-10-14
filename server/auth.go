@@ -51,6 +51,10 @@ func authHandler(dumps string, ctrSigner *ctrAuthSigner) http.HandlerFunc {
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/v1/friends/") {
+			handleCTRFriends(w, r, body, n, dumps)
+			return
+		}
 
 		// Request line only: the body carries the player's NSA id_token.
 		log.Printf("[RyuNET Auth] #%d %s %s%s from %s (%d bytes)", n, r.Method, r.Host, r.URL.RequestURI(), r.RemoteAddr, len(body))
@@ -143,15 +147,9 @@ func authHandler(dumps string, ctrSigner *ctrAuthSigner) http.HandlerFunc {
 		// The lobby recovers the session key by trying recently issued
 		// tickets: the 0x82's tag picks the right one. The player's identity
 		// (online friends, presence) is recovered from the 8-byte key.
-		if err := os.MkdirAll(sessDir, 0o755); err == nil {
-			name := fmt.Sprintf("%d_%x.tkt", time.Now().Unix(), clientTicket[33:37])
-			if err := os.WriteFile(filepath.Join(sessDir, name), clientTicket, 0o644); err != nil {
-				log.Printf("[RyuNET Auth] session: %v", err)
-			}
-			if raw, err := json.Marshal(id); err == nil {
-				_ = os.WriteFile(filepath.Join(sessDir, fmt.Sprintf("id_%x.json", clientTicket[33:41])), raw, 0o644)
-			}
-		}
+		// The lobby recovers the session key from in-memory issued tickets.
+		// Player identity is preserved without writing files to disk.
+		rememberTicket(clientTicket, id, time.Now(), ticketWindow)
 
 		ivSeed := req.IVSeed
 		if ivSeed == "" {

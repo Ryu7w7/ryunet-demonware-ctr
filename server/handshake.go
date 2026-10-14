@@ -103,8 +103,8 @@ func (l *lobbyConn) logf(format string, a ...any) {
 
 func (l *lobbyConn) readFull(n int) ([]byte, error) {
 	b := make([]byte, n)
-	// Long: a connection kept silent must last as long as the game keeps it.
-	_ = l.c.SetReadDeadline(time.Now().Add(30 * time.Minute))
+	// Timeout silent or dead connections after 5 minutes of inactivity.
+	_ = l.c.SetReadDeadline(time.Now().Add(5 * time.Minute))
 	_, err := io.ReadFull(l.c, b)
 	return b, err
 }
@@ -294,6 +294,13 @@ func (l *lobbyConn) candidates(raw []byte) []keyCand {
 	if t := findTicket(raw); t != nil {
 		add("ticket-0x82", t)
 	}
+	issuedMu.RLock()
+	for tag, it := range issuedTickets {
+		if len(it.ticket) == 128 {
+			add(fmt.Sprintf("mem_%x", tag[:4]), it.ticket)
+		}
+	}
+	issuedMu.RUnlock()
 	if entries, err := os.ReadDir(l.sessDir); err == nil {
 		cutoff := time.Now().Add(-72 * time.Hour)
 		for _, e := range entries {

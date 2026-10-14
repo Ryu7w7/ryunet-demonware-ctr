@@ -79,6 +79,15 @@ func (l *lobbyConn) loadIdentity(ticket []byte) {
 }
 
 func (l *lobbyConn) tryIdentity(ticket []byte) bool {
+	if id, ok := issuedIdentity(ticket); ok && id != nil {
+		l.player = id
+		onlineMu.Lock()
+		online[l.n] = id
+		delete(pending, l.n)
+		onlineMu.Unlock()
+		l.logf("player %q pid=%d", id.Username, id.PID)
+		return true
+	}
 	p := filepath.Join(l.sessDir, "id_"+hex.EncodeToString(ticket[33:41])+".json")
 	raw, err := os.ReadFile(p)
 	if err != nil {
@@ -233,6 +242,11 @@ func onlineUser(id uint64, alias string) *playerID {
 		if (p.PID != 0 && p.PID == id) || (alias != "" && strings.EqualFold(p.Username, alias)) {
 			return p
 		}
+		if p.Username != "" {
+			if calcPS4ID(p.Username, true) == id || calcPS4ID(p.Username, false) == id {
+				return p
+			}
+		}
 	}
 	return nil
 }
@@ -287,6 +301,41 @@ func (l *lobbyConn) onGetUserNames(task byte, r *bdReader) []byte {
 		}
 	}
 	l.logf("friends getUserNames %d request(s) -> %d online %v", len(ids), len(hits), hits)
+	return taskReply(task, 0, func(w *bdWriter) uint32 {
+		for _, h := range hits {
+			w.u64(h.id)
+			w.str(h.name)
+		}
+		return uint32(len(hits))
+	})
+}
+
+// onResolveNicks: 12/10. The game asks "who is this nick?" with
+// {u32 count, count x str nick} right after login (seen live: Ryu7w7's
+// client sends "ESDRONIX"). Without a PID answer the client can never
+// query 138/14 friend sessions and the friend stays NOT JOINABLE.
+// Reply mirrors 12/9 (per hit: u64 pid + str nick); unknown/offline
+// nicks are omitted like there.
+func (l *lobbyConn) onResolveNicks(task byte, r *bdReader) []byte {
+	n, err := r.u32()
+	if err != nil || n > 256 {
+		return taskReply(task, errUnhandled, nil)
+	}
+	type hit struct {
+		id   uint64
+		name string
+	}
+	var hits []hit
+	for i := uint32(0); i < n; i++ {
+		nick, err := r.str()
+		if err != nil || nick == "" {
+			continue
+		}
+		if p := onlineUser(0, nick); p != nil && p.PID != 0 {
+			hits = append(hits, hit{p.PID, p.Username})
+		}
+	}
+	l.logf("friends resolveNicks %d request(s) -> %d online %v", n, len(hits), hits)
 	return taskReply(task, 0, func(w *bdWriter) uint32 {
 		for _, h := range hits {
 			w.u64(h.id)

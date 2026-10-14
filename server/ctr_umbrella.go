@@ -67,29 +67,35 @@ func handleCTRUmbrella(w http.ResponseWriter, r *http.Request, body []byte, n ui
 		return
 	}
 	// Accept only a ticket issued by this private server, not arbitrary claims.
-	files, _ := filepath.Glob(filepath.Join(sessDir, "*.tkt"))
-	issued := false
-	for _, f := range files {
-		b, e := os.ReadFile(f)
-		if e == nil && bytes.Equal(b, ticket) {
-			issued = true
-			break
+	var id *playerID
+	if pid, ok := issuedTicketPlayer(ticket, time.Now(), 24*time.Hour); ok && pid != nil && pid.PID != 0 {
+		id = pid
+	} else {
+		// Fallback for tests or legacy tickets on disk
+		files, _ := filepath.Glob(filepath.Join(sessDir, "*.tkt"))
+		issued := false
+		for _, f := range files {
+			b, e := os.ReadFile(f)
+			if e == nil && bytes.Equal(b, ticket) {
+				issued = true
+				break
+			}
 		}
-	}
-	if !issued {
-		deny(401, fmt.Sprintf("ticket not issued here (%d on file)", len(files)))
-		return
-	}
-	// +25 carries the online id for CTR: age is read from the issue time (+13).
-	if issued := binary.LittleEndian.Uint32(ticket[13:17]); time.Since(time.Unix(int64(issued), 0)) > 24*time.Hour {
-		deny(401, fmt.Sprintf("ticket issued at %d is too old", issued))
-		return
-	}
-	raw, err := os.ReadFile(filepath.Join(sessDir, fmt.Sprintf("id_%x.json", ticket[33:41])))
-	var id playerID
-	if err != nil || json.Unmarshal(raw, &id) != nil || id.PID == 0 {
-		deny(401, fmt.Sprintf("unknown account: %v", err))
-		return
+		if !issued {
+			deny(401, fmt.Sprintf("ticket not issued here (%d on file)", len(files)))
+			return
+		}
+		if issuedAt := binary.LittleEndian.Uint32(ticket[13:17]); time.Since(time.Unix(int64(issuedAt), 0)) > 24*time.Hour {
+			deny(401, fmt.Sprintf("ticket issued at %d is too old", issuedAt))
+			return
+		}
+		raw, err := os.ReadFile(filepath.Join(sessDir, fmt.Sprintf("id_%x.json", ticket[33:41])))
+		var diskID playerID
+		if err != nil || json.Unmarshal(raw, &diskID) != nil || diskID.PID == 0 {
+			deny(401, fmt.Sprintf("unknown account: %v", err))
+			return
+		}
+		id = &diskID
 	}
 	token := make([]byte, 32)
 	if _, err := rand.Read(token); err != nil {

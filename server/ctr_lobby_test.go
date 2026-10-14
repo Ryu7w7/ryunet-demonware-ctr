@@ -187,3 +187,106 @@ func TestCTRSessionCreateDelete(t *testing.T) {
 		t.Fatal("owner deletion did not remove the session")
 	}
 }
+
+func TestCTRUmbrellaMemoryTicket(t *testing.T) {
+	ticket := make([]byte, 128)
+	binary.LittleEndian.PutUint32(ticket, ticketMagic)
+	binary.LittleEndian.PutUint32(ticket[5:], 5775)
+	binary.LittleEndian.PutUint32(ticket[13:], uint32(time.Now().Unix()))
+	binary.LittleEndian.PutUint64(ticket[25:], 1800000120)
+	copy(ticket[33:], []byte("test-mem-session"))
+	rememberTicket(ticket, playerID{PID: 1800000120, Username: "Coco"}, time.Now(), ticketWindow)
+
+	body, _ := json.Marshal(map[string]any{"ticket": base64.StdEncoding.EncodeToString(ticket), "titleID": 5775})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1.0/tokens/lsg/", bytes.NewReader(body))
+	handleCTRUmbrella(w, r, body, 1, "")
+	if w.Code != 200 {
+		t.Fatalf("memory ticket rejected by CTR Umbrella: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestCTRMatchmakerReapZombieRooms(t *testing.T) {
+	hostConn := &lobbyConn{n: 99111}
+	registerConn(hostConn)
+	defer unregisterConn(hostConn)
+
+	hostSearch := &ctrSearch{id: 1, pid: 101, conn: hostConn}
+
+	ctrMM.mu.Lock()
+	// Add an old room (> 20 min)
+	ctrMM.rooms[1001] = &ctrRoom{
+		id:      1001,
+		created: time.Now().Unix() - 25*60,
+		host:    hostSearch,
+		players: []*ctrSearch{hostSearch},
+		hostDoc: map[string]any{"lobby_open": true, "update_time": time.Now().Unix()},
+	}
+	// Add a room whose host is not in connStats (dead/closed)
+	deadHostConn := &lobbyConn{n: 99999}
+	ctrMM.rooms[1002] = &ctrRoom{
+		id:      1002,
+		created: time.Now().Unix(),
+		host:    &ctrSearch{id: 3, pid: 103, conn: deadHostConn},
+		players: []*ctrSearch{},
+		hostDoc: map[string]any{"lobby_open": true, "update_time": time.Now().Unix()},
+	}
+	ctrMM.mu.Unlock()
+
+	ctrMM.reap()
+
+	ctrMM.mu.Lock()
+	_, room1Exists := ctrMM.rooms[1001]
+	_, room2Exists := ctrMM.rooms[1002]
+	ctrMM.mu.Unlock()
+
+	if room1Exists {
+		t.Fatal("reap did not evict expired room 1001")
+	}
+	if room2Exists {
+		t.Fatal("reap did not evict dead host room 1002")
+	}
+}
+
+func TestCTRFriendSessionResolvedByPS4AccountID(t *testing.T) {
+	esdronixPID := calcPS4ID("ESDRONIX", true)
+	host := &lobbyConn{n: 6661, player: &playerID{Username: "ESDRONIX", PID: esdronixPID}}
+	onlineMu.Lock()
+	online[host.n] = host.player
+	onlineMu.Unlock()
+	defer dropOnline(host.n)
+	defer dropSessionsOf(host.n)
+
+	info := &bdWriter{}
+	info.blobv(make([]byte, 67))
+	info.u32(8)
+	info.u32(8)
+	host.onMatchMakingContext(mmCreateSession, &bdReader{b: info.b}, "ctr:Delta")
+
+	friend := &lobbyConn{n: 6662, player: &playerID{Username: "Ryu7w7", PID: calcPS4ID("Ryu7w7", true)}}
+
+	// Friend client sends raw C hash calcPS4ID("ESDRONIX", false)
+	rawHash := calcPS4ID("ESDRONIX", false)
+	askRaw := &bdWriter{}
+	askRaw.u64(rawHash)
+	replyRaw := friend.onFriendSessions(14, &bdReader{b: askRaw.b}, "ctr:Delta")
+	if n := binary.LittleEndian.Uint32(replyRaw[17:21]); n != 1 {
+		t.Fatalf("PS4 raw hash not resolved to host session: %d results", n)
+	}
+
+	// Friend client sends lowercase hash calcPS4ID("ESDRONIX", true)
+	lowerHash := calcPS4ID("ESDRONIX", true)
+	askLower := &bdWriter{}
+	askLower.u64(lowerHash)
+	replyLower := friend.onFriendSessions(14, &bdReader{b: askLower.b}, "ctr:Delta")
+	if n := binary.LittleEndian.Uint32(replyLower[17:21]); n != 1 {
+		t.Fatalf("PS4 lower hash not resolved to host session: %d results", n)
+	}
+
+	// Friend asks getUserNames (12/9) with raw hash
+	replyUsers := friend.onGetUserNames(9, &bdReader{b: askRaw.b})
+	if n := binary.LittleEndian.Uint32(replyUsers[17:21]); n != 1 {
+		t.Fatalf("PS4 getUserNames did not find friend: %d results", n)
+	}
+}
+

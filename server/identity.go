@@ -55,6 +55,27 @@ func isHexIdentity(s string) bool {
 	return true
 }
 
+func calcPS4ID(username string, lowerSha bool) uint64 {
+	if username == "" {
+		return 0
+	}
+	h := fnv.New64a()
+	h.Write([]byte(strings.ToLower(username)))
+	hash := h.Sum64()
+	var sha [32]byte
+	if lowerSha {
+		sha = sha256.Sum256([]byte(strings.ToLower(username)))
+	} else {
+		sha = sha256.Sum256([]byte(username))
+	}
+	mix := binary.LittleEndian.Uint64(sha[:8]) ^ hash
+	pid := 1810000000 + (mix % 80000000)
+	if pid == 0 {
+		pid = 1810000001
+	}
+	return pid
+}
+
 // playerIdentity returns the player identity and the raw nnex claim ("" if missing).
 func playerIdentity(body []byte) (playerID, string) {
 	id := playerID{Kind: "switch"}
@@ -156,16 +177,7 @@ func playerIdentity(body []byte) (playerID, string) {
 
 	// PS4 CTR: if we have a valid username (from id_token, extra.Username, etc.), derive a deterministic PID
 	if id.Username != "" && !strings.EqualFold(id.Username, "356c4bc3") {
-		h := fnv.New64a()
-		h.Write([]byte(strings.ToLower(id.Username)))
-		hash := h.Sum64()
-		sha := sha256.Sum256([]byte(strings.ToLower(id.Username)))
-		mix := binary.LittleEndian.Uint64(sha[:8]) ^ hash
-		pid := 1810000000 + (mix % 80000000)
-		if pid == 0 {
-			pid = 1810000001
-		}
-		id.PID = pid
+		id.PID = calcPS4ID(id.Username, true)
 		id.Kind = "shadps4"
 		if isPS4Title {
 			id.Kind = "ps4"

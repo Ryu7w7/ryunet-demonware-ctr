@@ -165,6 +165,7 @@ func main() {
 	go serveNAT(natPort)
 	startCTRRelay(envOrInt("CTR_RELAY_PORT_LOW", 0), envOrInt("CTR_RELAY_PORT_HIGH", 0), nextendoHost)
 	go reapSessions()
+	ctrMM.startReaper()
 	startLobby()
 
 	// PS4 PoC: also serve cleartext HTTP for shadPS4 host_overrides.json (http://127.0.0.1:8080)

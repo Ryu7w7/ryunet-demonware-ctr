@@ -53,15 +53,18 @@ type ctrSearch struct {
 	seats int
 }
 type ctrRoom struct {
-	id, version uint64
-	created     int64
-	host        *ctrSearch
-	players     []*ctrSearch
-	hostDoc     map[string]any
-	capacity    int
-	notified    map[*lobbyConn]bool
-	mergeSource *ctrRoom
-	mergeTarget uint64
+	id, version  uint64
+	created      int64
+	host         *ctrSearch
+	players      []*ctrSearch
+	hostDoc      map[string]any
+	capacity     int
+	notified     map[*lobbyConn]bool
+	mergeSource  *ctrRoom
+	mergeTarget  uint64
+	lastHostSync int64
+	pendingGuest bool
+	pendingSince int64
 }
 type ctrMatchmaker struct {
 	mu      sync.Mutex
@@ -134,7 +137,9 @@ func (n ctrNotice) write(w *bdWriter) {
 func sendCTRNotices(notices []ctrNotice) {
 	for _, n := range notices {
 		if err := n.conn.sendPush(n.event, n.write); err != nil {
-			n.conn.logf("CTR matchmaking push event=%d failed: %v", n.event, err)
+			n.conn.logf("CTR matchmaking push event=%d failed: %v (dropping connection)", n.event, err)
+			ctrMM.leave(n.conn, 0)
+			_ = n.conn.c.Close()
 		} else {
 			n.conn.logf("CTR matchmaking push event=%d", n.event)
 		}
@@ -270,6 +275,10 @@ func (m *ctrMatchmaker) enqueue(s *ctrSearch) []ctrNotice {
 			reason = "room-capacity"
 		case r.occupancy()+s.seats > s.doc.Slots.Max:
 			reason = "search-capacity"
+		case r.pendingGuest && time.Now().Unix()-r.pendingSince > 20:
+			reason = "host-unresponsive"
+		case r.lastHostSync > 0 && time.Now().Unix()-r.lastHostSync > 300:
+			reason = "host-stale"
 		}
 		s.conn.logf("CTR candidate search=%d seats=%d filter=%s room=%d room_filter=%s open=%t occupied=%d connected=%d capacity=%d search_max=%d reason=%s", s.id, s.seats, s.filterID, r.id, r.host.filterID, open, r.occupancy(), r.connected(), r.capacity, s.doc.Slots.Max, reason)
 		if reason == "selected" {
@@ -282,6 +291,8 @@ func (m *ctrMatchmaker) enqueue(s *ctrSearch) []ctrNotice {
 			r.players = append(r.players, s)
 			r.capacity = min(r.capacity, s.doc.Slots.Max)
 			r.version++
+			r.pendingGuest = true
+			r.pendingSince = time.Now().Unix()
 			r.hostDoc["update_id"] = r.version
 			r.hostDoc["update_time"] = time.Now().Unix()
 			out := []ctrNotice{r.notice(r.host, ctrUpdateLobby)}
@@ -410,6 +421,8 @@ func (m *ctrMatchmaker) syncDoc(conn *lobbyConn, id, version uint64, raw string)
 	// them: "you can only join once, and after it starts nobody else gets in".
 	doc["update_id"] = r.version
 	doc["update_time"] = time.Now().Unix()
+	r.lastHostSync = time.Now().Unix()
+	r.pendingGuest = false
 	r.hostDoc = doc
 	mergeNotices := m.finishMerge(r)
 	// Remove only members the host explicitly rejected. Keep connected party
@@ -483,4 +496,66 @@ func (m *ctrMatchmaker) syncDoc(conn *lobbyConn, id, version uint64, raw string)
 		out = append(out, m.startMerge(r)...)
 	}
 	return true, out
+}
+
+func (m *ctrMatchmaker) startReaper() {
+	go func() {
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			m.reap()
+		}
+	}()
+}
+
+func (m *ctrMatchmaker) reap() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now().Unix()
+
+	for roomID, r := range m.rooms {
+		// 1. Host connection is already closed
+		if r.host == nil || r.host.conn == nil || !isConnLive(r.host.conn.n) {
+			delete(m.rooms, roomID)
+			continue
+		}
+
+		// 2. Room is older than 20 minutes (CTR races take 3-5 min)
+		if now-r.created > 20*60 {
+			delete(m.rooms, roomID)
+			continue
+		}
+
+		// 3. Host has not synced or sent any document in 5 minutes
+		updateTime := r.created
+		if r.lastHostSync > 0 {
+			updateTime = r.lastHostSync
+		} else if ut, ok := r.hostDoc["update_time"].(int64); ok && ut > 0 {
+			updateTime = ut
+		}
+		if now-updateTime > 5*60 {
+			delete(m.rooms, roomID)
+			continue
+		}
+
+		// 4. Clean disconnected guest players from the room
+		kept := r.players[:0]
+		for _, p := range r.players {
+			if p.conn != nil && isConnLive(p.conn.n) {
+				kept = append(kept, p)
+			} else {
+				delete(r.notified, p.conn)
+			}
+		}
+		r.players = kept
+	}
+
+	// Clean dead waiting searches
+	waitingKept := m.waiting[:0]
+	for _, s := range m.waiting {
+		if s.conn != nil && isConnLive(s.conn.n) {
+			waitingKept = append(waitingKept, s)
+		}
+	}
+	m.waiting = waitingKept
 }

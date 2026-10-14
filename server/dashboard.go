@@ -55,8 +55,12 @@ type taskEvent struct {
 
 func registerConn(l *lobbyConn) {
 	now := time.Now()
+	addr := ""
+	if l != nil && l.c != nil && l.c.RemoteAddr() != nil {
+		addr = l.c.RemoteAddr().String()
+	}
 	statsMu.Lock()
-	connStats[l.n] = &connStat{addr: l.c.RemoteAddr().String(), first: now, last: now}
+	connStats[l.n] = &connStat{addr: addr, first: now, last: now}
 	statsMu.Unlock()
 }
 
@@ -64,6 +68,16 @@ func unregisterConn(l *lobbyConn) {
 	statsMu.Lock()
 	delete(connStats, l.n)
 	statsMu.Unlock()
+}
+
+func isConnLive(n uint64) bool {
+	statsMu.Lock()
+	defer statsMu.Unlock()
+	if len(connStats) == 0 {
+		return true
+	}
+	_, ok := connStats[n]
+	return ok
 }
 
 // connPID returns the Nextendo PID of a lobby connection's player (0 if unknown).

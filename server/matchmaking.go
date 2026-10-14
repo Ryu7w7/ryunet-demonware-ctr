@@ -85,9 +85,19 @@ func reapSessions() {
 func reapSessionsOnce() {
 	sessionsMu.Lock()
 	defer sessionsMu.Unlock()
+	now := time.Now()
 	for id, s := range sessions {
-		if s.owner == 0 && time.Since(s.orphaned) > orphanGrace {
+		if s.owner == 0 && now.Sub(s.orphaned) > orphanGrace {
 			delete(sessions, id)
+			continue
+		}
+		if s.owner != 0 && !isConnLive(s.owner) {
+			delete(sessions, id)
+			continue
+		}
+		if !s.updated.IsZero() && now.Sub(s.updated) > 30*time.Minute {
+			delete(sessions, id)
+			continue
 		}
 	}
 }

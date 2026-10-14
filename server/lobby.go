@@ -10,6 +10,7 @@ import (
 	"net"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 var connNum atomic.Uint64
@@ -33,6 +34,10 @@ func startLobby() {
 				c, err := ln.Accept()
 				if err != nil {
 					return
+				}
+				if tc, ok := c.(*net.TCPConn); ok {
+					_ = tc.SetKeepAlive(true)
+					_ = tc.SetKeepAlivePeriod(30 * time.Second)
 				}
 				lc := &lobbyConn{c: c, n: connNum.Add(1), dumpDir: dumps, sessDir: sessDir, pubDir: pubDir}
 				go func() {

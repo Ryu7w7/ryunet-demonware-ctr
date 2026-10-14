@@ -287,6 +287,9 @@ func (l *lobbyConn) onTask(payload []byte) {
 	case service == svcTitleUtilities && task == 9:
 		reply = l.onGetUserNames(task, r)
 
+	case service == svcTitleUtilities && task == 10:
+		reply = l.onResolveNicks(task, r)
+
 	case service == 29 && (task == 1 || task == 4):
 		if reply = l.onUserData(task, r); reply == nil {
 			reply = taskReply(task, 0, nil)
