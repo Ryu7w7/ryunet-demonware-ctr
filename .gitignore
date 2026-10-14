@@ -17,6 +17,8 @@ nextendo.env
 *.der
 nextendo_secret.key
 ryunet_secret.key
+docs/
+docs/RESUMEN_CONFIGURACION.md
 
 # Runtime states, dumps and captures
 sessions/
