@@ -66,6 +66,9 @@ type ctrRoom struct {
 	lastHostSync int64
 	pendingGuest bool
 	pendingSince int64
+	// Party members (not the leaders who searched) already sent this room's join or
+	// merge event; see ctr_party.go.
+	notifiedPID map[uint64]bool
 }
 type ctrMatchmaker struct {
 	mu      sync.Mutex
@@ -482,6 +485,9 @@ func (m *ctrMatchmaker) syncDoc(conn *lobbyConn, id, version uint64, raw string)
 			r.notified[p.conn] = true
 			out = append(out, r.notice(p, ctrJoinLobby))
 		}
+		// The host's own party members included: the host has now created the lobby
+		// they are expected in.
+		out = append(out, r.memberNotices(p, ctrJoinLobby, []uint64{p.id, r.id})...)
 	}
 	// A search already waiting must be reconsidered when the host opens its
 	// lobby or reports failed joins. Otherwise it waits for an unrelated new

@@ -108,6 +108,7 @@ func (m *ctrMatchmaker) finishMerge(dst *ctrRoom) []ctrNotice {
 		// lobby ID and passes the third to joinLobby; the first is the search ID.
 		out = append(out, ctrNotice{p.conn, ctrMergeLobby, []uint64{p.id, src.id, dst.id}, h, b})
 		dst.notified[p.conn] = true
+		out = append(out, dst.memberNotices(p, ctrMergeLobby, []uint64{p.id, src.id, dst.id})...)
 	}
 	dst.host.conn.debugf("CTR merge dispatched source=%d destination=%d searches=%d total=%d", src.id, dst.id, len(src.players), dst.occupancy())
 	return out

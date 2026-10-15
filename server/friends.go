@@ -85,6 +85,7 @@ func (l *lobbyConn) tryIdentity(ticket []byte) bool {
 		online[l.n] = id
 		delete(pending, l.n)
 		onlineMu.Unlock()
+		rememberConn(l)
 		l.logf("player %q pid=%d", id.Username, id.PID)
 		return true
 	}
@@ -106,6 +107,7 @@ func (l *lobbyConn) tryIdentity(ticket []byte) bool {
 	online[l.n] = &id
 	delete(pending, l.n)
 	onlineMu.Unlock()
+	rememberConn(l)
 	l.logf("player %q pid=%d", id.Username, id.PID)
 	return true
 }

@@ -150,6 +150,7 @@ func (l *lobbyConn) dump(tag string, b []byte) {
 
 func (l *lobbyConn) run() {
 	defer l.c.Close()
+	defer forgetConn(l)
 	defer dropSessionsOf(l.n)
 	defer ctrMM.leave(l, 0)
 	defer dropOnline(l.n)
