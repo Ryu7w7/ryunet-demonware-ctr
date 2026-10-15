@@ -86,6 +86,8 @@ type relayTable struct {
 
 var relay = &relayTable{pairs: map[string]*relayPair{}, byPort: map[int]*relayPair{}}
 
+var relayNoPublicOnce sync.Once
+
 func relayEnabled() bool { return relay.high >= relay.low && relay.low > 0 }
 
 func startCTRRelay(low, high int, host string) {
@@ -142,6 +144,11 @@ func withRelay(hostAddr []byte, hostPID, joinerPID uint64) []byte {
 	}
 	dst := hostPublicAddr(hostAddr)
 	if dst == nil {
+		// Without a public address there is nothing to relay to. Say so once: if the
+		// client never fills that slot, the relay is silently doing nothing.
+		relayNoPublicOnce.Do(func() {
+			log.Printf("[CTR Relay] host pid=%d advertises no public address; relay not offered (logged once)", hostPID)
+		})
 		return hostAddr
 	}
 	p := relay.pairFor(hostPID, joinerPID, dst)
@@ -191,7 +198,7 @@ func (t *relayTable) pairFor(hostPID, joinerPID uint64, host *net.UDPAddr) *rela
 		p := &relayPair{port: port, host: host, conn: conn, last: time.Now()}
 		t.pairs[key], t.byPort[port] = p, p
 		go p.serve()
-		debugf("[CTR Relay] pair %d<->%d on :%d (host %s)", hostPID, joinerPID, port, host)
+		log.Printf("[CTR Relay] pair %d<->%d on :%d (host %s)", hostPID, joinerPID, port, host)
 		return p
 	}
 	log.Printf("[CTR Relay] no free port for %d<->%d", hostPID, joinerPID)
@@ -212,7 +219,7 @@ func (p *relayPair) serve() {
 		fromHost := host != nil && src.IP.Equal(host.IP) && src.Port == host.Port
 		if !fromHost && (joiner == nil || !src.IP.Equal(joiner.IP) || src.Port != joiner.Port) {
 			p.joiner, joiner = src, src
-			debugf("[CTR Relay] :%d FIRST PACKET from %s (%d bytes) — the game DOES use relay slots",
+			log.Printf("[CTR Relay] :%d FIRST PACKET from %s (%d bytes) — the game DOES use relay slots",
 				p.port, src, n)
 		}
 		p.last = time.Now()
