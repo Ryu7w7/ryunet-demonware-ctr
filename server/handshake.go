@@ -33,6 +33,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"iter"
 	"log"
 	"net"
 	"os"
@@ -240,7 +241,9 @@ func (l *lobbyConn) onClientAuth(raw []byte) bool {
 	t.Write(raw[:len(raw)-8])
 	transcript := t.Bytes()
 
-	for _, cand := range l.candidates(raw) {
+	tried := 0
+	for cand := range l.candidates(raw) {
+		tried++
 		for _, wrapped := range []bool{false, true} {
 			k24 := cand.key24
 			if wrapped {
@@ -275,7 +278,7 @@ func (l *lobbyConn) onClientAuth(raw []byte) bool {
 	// Failure: we do NOT close. A silent lobby connection leaves the game
 	// "friends only" online (P2P invites); a close or an invalid frame flips
 	// it offline after a few tries.
-	l.logf("0x82: no key reproduces tag %X (%d candidates) — connection kept silent\n%s", tag, len(l.candidates(raw)), hex.Dump(raw))
+	l.logf("0x82: no key reproduces tag %X (%d candidates) — connection kept silent\n%s", tag, tried, hex.Dump(raw))
 	return true
 }
 
@@ -284,45 +287,58 @@ type keyCand struct {
 	key24 []byte
 }
 
-// candidates gathers the plausible 24-byte keys: the ticket extracted from
-// the 0x82 itself, tickets issued by d3-auth, and zero (older tickets, whose
-// bytes 97..120 were null).
-func (l *lobbyConn) candidates(raw []byte) []keyCand {
-	var out []keyCand
-	add := func(name string, t []byte) {
-		out = append(out,
-			keyCand{name + "[97:121]", append([]byte{}, t[97:121]...)},
-			keyCand{name + "[33:57]", append([]byte{}, t[33:57]...)},
-		)
-	}
-	if t := findTicket(raw); t != nil {
-		add("ticket-0x82", t)
-	}
-	issuedMu.RLock()
-	for tag, it := range issuedTickets {
-		if len(it.ticket) == 128 {
-			add(fmt.Sprintf("mem_%x", tag[:4]), it.ticket)
+// candidates yields the plausible 24-byte keys, cheapest and likeliest first: the
+// ticket extracted from the 0x82 itself, tickets issued in memory, tickets saved
+// under sessDir, and zero (older tickets, whose bytes 97..120 were null).
+//
+// It is lazy on purpose. Building the whole list up front read every ticket file
+// of the last 72 hours on EVERY handshake, although the 0x82's own ticket almost
+// always matches first. With tens of thousands of files that was invisible on a
+// warm, steady server and saturated the machine when a restart made hundreds of
+// players reconnect at once.
+func (l *lobbyConn) candidates(raw []byte) iter.Seq[keyCand] {
+	return func(yield func(keyCand) bool) {
+		emit := func(name string, t []byte) bool {
+			return yield(keyCand{name + "[97:121]", append([]byte{}, t[97:121]...)}) &&
+				yield(keyCand{name + "[33:57]", append([]byte{}, t[33:57]...)})
 		}
-	}
-	issuedMu.RUnlock()
-	if entries, err := os.ReadDir(l.sessDir); err == nil {
-		cutoff := time.Now().Add(-72 * time.Hour)
-		for _, e := range entries {
-			if !strings.HasSuffix(e.Name(), ".tkt") {
-				continue
-			}
-			info, err := e.Info()
-			if err != nil || info.ModTime().Before(cutoff) {
-				continue
-			}
-			b, err := os.ReadFile(filepath.Join(l.sessDir, e.Name()))
-			if err == nil && len(b) == 128 {
-				add(e.Name(), b)
+		if t := findTicket(raw); t != nil && !emit("ticket-0x82", t) {
+			return
+		}
+		// Copy under the lock: deriving keys while holding it would stall auth.
+		issuedMu.RLock()
+		mem := make([][]byte, 0, len(issuedTickets))
+		names := make([]string, 0, len(issuedTickets))
+		for tag, it := range issuedTickets {
+			if len(it.ticket) == 128 {
+				mem = append(mem, it.ticket)
+				names = append(names, fmt.Sprintf("mem_%x", tag[:4]))
 			}
 		}
+		issuedMu.RUnlock()
+		for i, t := range mem {
+			if !emit(names[i], t) {
+				return
+			}
+		}
+		if entries, err := os.ReadDir(l.sessDir); err == nil {
+			cutoff := time.Now().Add(-72 * time.Hour)
+			for _, e := range entries {
+				if !strings.HasSuffix(e.Name(), ".tkt") {
+					continue
+				}
+				info, err := e.Info()
+				if err != nil || info.ModTime().Before(cutoff) {
+					continue
+				}
+				b, err := os.ReadFile(filepath.Join(l.sessDir, e.Name()))
+				if err == nil && len(b) == 128 && !emit(e.Name(), b) {
+					return
+				}
+			}
+		}
+		yield(keyCand{"zero", make([]byte, 24)})
 	}
-	out = append(out, keyCand{"zero", make([]byte, 24)})
-	return out
 }
 
 // findTicket looks for the magic DE AD BD EF in the 0x82's bdBitBuffer, at
