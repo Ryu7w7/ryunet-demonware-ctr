@@ -20,8 +20,8 @@ package main
 
 import (
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -263,7 +263,7 @@ func (l *lobbyConn) onTask(payload []byte) {
 	case service == svcTitleUtilities && task == taskGetServerTime:
 		now := uint32(time.Now().Unix())
 		reply = taskReply(task, 0, func(w *bdWriter) uint32 { w.u32(now); return 1 })
-		l.logf("task bdTitleUtilities.getServerTime -> %d", now)
+		l.debugf("task bdTitleUtilities.getServerTime -> %d", now)
 
 	case service == svcStorage && task == taskGetPublisherFile:
 		ctx, err1 := r.str()
@@ -282,7 +282,7 @@ func (l *lobbyConn) onTask(payload []byte) {
 			break
 		}
 		reply = taskReply(task, 0, func(w *bdWriter) uint32 { w.blobv(data); return 1 })
-		l.logf("task bdStorage.getPublisherFile ctx=%q file=%q -> %s (%d bytes)", ctx, name, path, len(data))
+		l.debugf("task bdStorage.getPublisherFile ctx=%q file=%q -> %s (%d bytes)", ctx, name, path, len(data))
 
 	case service == svcTitleUtilities && task == 9:
 		reply = l.onGetUserNames(task, r)
@@ -321,7 +321,7 @@ func (l *lobbyConn) onTask(payload []byte) {
 			l.lobbyDoc = doc
 		}
 		reply = taskReply(task, 0, nil)
-		l.logf("task bdAsyncMatchMaking.setPlayerInfo -> success (%d bytes)", len(l.lobbyDoc))
+		l.debugf("task bdAsyncMatchMaking.setPlayerInfo -> success (%d bytes)", len(l.lobbyDoc))
 
 	case service == svcAsyncMatchMaking && task == taskSyncLobbyDocuments:
 		id, e1 := r.u64()
@@ -334,14 +334,14 @@ func (l *lobbyConn) onTask(payload []byte) {
 			l.afterReply = func() { sendCTRNotices(notices) }
 		}
 		reply = taskReply(task, 0, func(w *bdWriter) uint32 { w.boolv(ok); return 1 })
-		l.logf("CTR sync lobby=%d version=%d accepted=%v", id, version, ok)
+		l.debugf("CTR sync lobby=%d version=%d accepted=%v", id, version, ok)
 
 	case service == svcAsyncMatchMaking && task == taskGetPlayerToken:
 		// getMatchMakingPlayerToken -> bdUInt64Result (readUInt64). This is the
 		// requestPlayerToken step of CNetworkTaskAsyncMatchMakingRegistration: without a token the
 		// registration state machine cannot advance.
 		reply = taskReply(task, 0, func(w *bdWriter) uint32 { w.u64(l.pid()); return 1 })
-		l.logf("task bdAsyncMatchMaking.getMatchMakingPlayerToken -> %d", l.pid())
+		l.debugf("task bdAsyncMatchMaking.getMatchMakingPlayerToken -> %d", l.pid())
 
 	case service == svcAsyncMatchMaking && task == taskStartSearch:
 		raw, err := r.str()
@@ -359,7 +359,7 @@ func (l *lobbyConn) onTask(payload []byte) {
 		reply = taskReply(task, 0, func(w *bdWriter) uint32 { w.strv(doc); return 1 })
 		l.afterReply = func() {
 			notices := ctrMM.enqueue(search)
-			l.logf("CTR search id=%d registered; seats=%d filter=%s notifications=%d",
+			l.debugf("CTR search id=%d registered; seats=%d filter=%s notifications=%d",
 				search.id, search.seats, search.filterID, len(notices))
 			sendCTRNotices(notices)
 		}
@@ -381,18 +381,20 @@ func (l *lobbyConn) onTask(payload []byte) {
 		// All of these return a bdStringResult (readString).
 		id := strconv.FormatUint(l.pid(), 10)
 		reply = taskReply(task, 0, func(w *bdWriter) uint32 { w.strv(id); return 1 })
-		l.logf("task bdAsyncMatchMaking task=%d -> string %q", task, id)
+		l.debugf("task bdAsyncMatchMaking task=%d -> string %q", task, id)
 
 	case service == svcAsyncMatchMaking &&
 		(task == taskQoSHostsReply || task == taskAckExpectGame):
 		// No result.
 		reply = taskReply(task, 0, nil)
-		l.logf("task bdAsyncMatchMaking task=%d -> empty success", task)
+		l.debugf("task bdAsyncMatchMaking task=%d -> empty success", task)
 
 	case service == svcAsyncMatchMaking && task == taskGetLobbyDocuments:
 		id, err := r.u64()
 		h, b, ok := ctrMM.documents(l, id)
 		if err != nil || !ok {
+			// Logged at info: a refused lobby document means a player cannot connect.
+			l.logf("CTR getLobbyDocuments refused lobby=%d pid=%d err=%v", id, l.pid(), err)
 			reply = taskReply(task, errUnhandled, nil)
 			break
 		}
@@ -406,7 +408,7 @@ func (l *lobbyConn) onTask(payload []byte) {
 		// fails deserialization -> bdRemoteTask error 4 -> the login sequence fails.
 		body := []byte(`{"expiresIn":3600,"ABToken":"ryunet","enrollments":[]}`)
 		reply = httpProxyReply(task, 200, body)
-		l.logf("task bdABTesting.enroll -> 200 (%d bytes)", len(body))
+		l.debugf("task bdABTesting.enroll -> 200 (%d bytes)", len(body))
 
 	case service == svcObjectStore:
 		reply = l.onObjectStore(task, payload)
@@ -417,20 +419,20 @@ func (l *lobbyConn) onTask(payload []byte) {
 	case service == svcMarketplace:
 		if reply = l.onMarketplace(task, payload); reply == nil {
 			reply = taskReply(task, 0, nil)
-			l.logf("task marketplace UNHANDLED task=%d args:\n%s", task, hex.Dump(payload))
+			l.logUnhandled(fmt.Sprintf("task marketplace UNHANDLED task=%d args", task), service, task, payload)
 		}
 
 	case service == svcMatchMaking:
 		if reply = l.onMatchMaking(task, r); reply == nil {
 			reply = taskReply(task, 0, nil)
-			l.logf("task matchmaking UNHANDLED task=%d args:\n%s", task, hex.Dump(payload))
+			l.logUnhandled(fmt.Sprintf("task matchmaking UNHANDLED task=%d args", task), service, task, payload)
 		}
 
 	default:
 		// Success with no result: harmless for list requests, whereas an
 		// error may mark the service unavailable on the game side.
 		reply = taskReply(task, 0, nil)
-		l.logf("task UNHANDLED service=%d task=%d (empty success) args:\n%s", service, task, hex.Dump(payload))
+		l.logUnhandled(fmt.Sprintf("task UNHANDLED service=%d task=%d (empty success) args", service, task), service, task, payload)
 	}
 
 	if pending := l.afterReply; pending != nil {

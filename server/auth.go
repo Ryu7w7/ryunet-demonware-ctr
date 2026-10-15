@@ -57,7 +57,7 @@ func authHandler(dumps string, ctrSigner *ctrAuthSigner) http.HandlerFunc {
 		}
 
 		// Request line only: the body carries the player's NSA id_token.
-		log.Printf("[RyuNET Auth] #%d %s %s%s from %s (%d bytes)", n, r.Method, r.Host, r.URL.RequestURI(), r.RemoteAddr, len(body))
+		debugf("[RyuNET Auth] #%d %s %s%s from %s (%d bytes)", n, r.Method, r.Host, r.URL.RequestURI(), r.RemoteAddr, len(body))
 		if dumps != "" && len(body) > 0 {
 			name := fmt.Sprintf("%03d_%s_%s.bin", n, r.Method,
 				strings.NewReplacer("/", "_", "?", "_", "&", "_", ":", "_").Replace(strings.TrimPrefix(r.URL.RequestURI(), "/")))
@@ -229,7 +229,7 @@ func authHandler(dumps string, ctrSigner *ctrAuthSigner) http.HandlerFunc {
 		}
 
 		loginsTotal.Add(1)
-		log.Printf("[RyuNET Auth] #%d %q pid=%d kind=%s -> 200 code=700 auth_task=%s", n, id.Username, id.PID, id.Kind, authTask)
+		debugf("[RyuNET Auth] #%d %q pid=%d kind=%s -> 200 code=700 auth_task=%s", n, id.Username, id.PID, id.Kind, authTask)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(out)

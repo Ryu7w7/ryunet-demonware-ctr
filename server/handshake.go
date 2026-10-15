@@ -93,6 +93,10 @@ type lobbyConn struct {
 	// Last host document received in 145/2, returned as-is in 145/3.
 	lobbyDoc string
 
+	// bdUserAccountID account type ("psn", "nintendo"), taken from the
+	// marketplace context the client sends. Empty until Pit Stop is opened.
+	accountType string
+
 	// Sent after the in-flight task reply (pushed messages).
 	afterReply func()
 }
@@ -148,7 +152,7 @@ func (l *lobbyConn) run() {
 	defer dropSessionsOf(l.n)
 	defer ctrMM.leave(l, 0)
 	defer dropOnline(l.n)
-	l.logf("==== CONNECT from=%s", l.c.RemoteAddr())
+	l.debugf("==== CONNECT from=%s", l.c.RemoteAddr())
 
 	hello, err := l.readFull(helloLen)
 	if err != nil {
@@ -163,7 +167,7 @@ func (l *lobbyConn) run() {
 	}
 	l.maxLen = v(16)
 	l.nonce = append([]byte{}, hello[20:28]...)
-	l.logf("hello ok: versions 210..220 maxFrame=0x%X nonce=%X", l.maxLen, l.nonce)
+	l.debugf("hello ok: versions 210..220 maxFrame=0x%X nonce=%X", l.maxLen, l.nonce)
 
 	// 0x81: version | server identifier (conn+0x268, surfaced to the game in
 	// the "connected" event) | 8 bytes the client only skips over.
@@ -178,7 +182,7 @@ func (l *lobbyConn) run() {
 		l.logf("send 0x81: %v", err)
 		return
 	}
-	l.logf("-> 0x81 version=%d id=0x%X", lobbyVersion, id)
+	l.debugf("-> 0x81 version=%d id=0x%X", lobbyVersion, id)
 
 	for {
 		raw, err := l.readFrame()
@@ -245,7 +249,7 @@ func (l *lobbyConn) onClientAuth(raw []byte) bool {
 			k := deriveKeys(transcript, k24)
 			if bytes.Equal(k.clientTag[:], tag) {
 				l.keys = &k
-				l.logf("0x82 AUTHENTICATED — key=%s rsa=%v", cand.name, wrapped)
+				l.debugf("0x82 AUTHENTICATED — key=%s rsa=%v", cand.name, wrapped)
 				if tk := findTicket(raw); tk != nil {
 					l.loadIdentity(tk)
 				}
@@ -253,7 +257,7 @@ func (l *lobbyConn) onClientAuth(raw []byte) bool {
 					l.logf("send 0x83: %v", err)
 					return false
 				}
-				l.logf("-> 0x83 chk=%X ; encrypted session established", k.serverChk)
+				l.debugf("-> 0x83 chk=%X ; encrypted session established", k.serverChk)
 				// The 0x83 already sets [+0x258]=3, the only condition for getStatus()==2: the 0x87 adds
 				// nothing and makes the game wait for a migration (closes after ~12 s). Kept behind CTR_MIGRATE.
 				if migrateEnabled {
@@ -261,7 +265,7 @@ func (l *lobbyConn) onClientAuth(raw []byte) bool {
 						l.logf("send 0x87: %v", err)
 						return false
 					}
-					l.logf("-> 0x87 migrate-init")
+					l.debugf("-> 0x87 migrate-init")
 				}
 				return true
 			}
@@ -407,14 +411,14 @@ func (l *lobbyConn) onEncrypted(raw []byte) {
 	if inner == msgMigrateAck {
 		// 0x88 closes 0x87: nothing is expected after it. A 0x89 would trigger a real migration.
 		if !migrateEnabled {
-			l.logf("0x88 migrate-ack — LSG login complete")
+			l.debugf("0x88 migrate-ack — LSG login complete")
 			return
 		}
 		if err := l.sendEncrypted(msgMigrateGo, migrateGoPayload()); err != nil {
 			l.logf("sending 0x89: %v", err)
 			return
 		}
-		l.logf("-> 0x89 migrate-go %s:%d", migrateIP(), migratePort)
+		l.debugf("-> 0x89 migrate-go %s:%d", migrateIP(), migratePort)
 		return
 	}
 	l.logf("internal message 0x%02X ignored (%d bytes)", inner, n)

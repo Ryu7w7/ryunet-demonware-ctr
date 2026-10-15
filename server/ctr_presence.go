@@ -99,7 +99,7 @@ func (l *lobbyConn) onRichPresence(task byte, r *bdReader) []byte {
 		richMu.Lock()
 		rich[id] = richPresence{plat, flag, data}
 		richMu.Unlock()
-		l.logf("richpresence SET pid=%d ctx=%q %d bytes", id, ctx, len(data))
+		l.debugf("richpresence SET pid=%d ctx=%q %d bytes", id, ctx, len(data))
 		return taskReply(task, 0, nil)
 
 	case rpGet, rpGetAndSubscribe:
@@ -130,7 +130,7 @@ func (l *lobbyConn) onRichPresence(task byte, r *bdReader) []byte {
 			hits = append(hits, hit{id, p})
 		}
 		richMu.Unlock()
-		l.logf("richpresence GET ctx=%q %d demande(s) -> %d presence(s)", ctx, len(ids), len(hits))
+		l.debugf("richpresence GET ctx=%q %d demande(s) -> %d presence(s)", ctx, len(ids), len(hits))
 		return taskReply(task, 0, func(w *bdWriter) uint32 {
 			for _, h := range hits {
 				w.u64(h.id)

@@ -84,7 +84,7 @@ func serveNAT(port int) {
 			dstIP := net.IPv4(dst[0], dst[1], dst[2], dst[3])
 			dstPort := int(binary.LittleEndian.Uint16(dst[4:6]))
 			if dstPort == 0 || dstIP.Equal(net.IPv4(0, 255, 0, 255)) {
-				log.Printf("[RyuNET NAT] 0x0A from %s without destination: %X", addr, buf[:n])
+				debugf("[RyuNET NAT] 0x0A from %s without destination: %X", addr, buf[:n])
 				continue
 			}
 			intro := append([]byte{0x0B}, buf[1:n]...)
@@ -101,7 +101,7 @@ func serveNAT(port int) {
 					Port: int(binary.LittleEndian.Uint16(src[4:6]))}
 				ua, _ := addr.(*net.UDPAddr)
 				mismatch := ua == nil || !ua.IP.Equal(srcAddr.IP) || ua.Port != srcAddr.Port
-				log.Printf("[RyuNET NAT] INTRO %s -> %s (id=%X) claimed_src=%s mismatch=%v",
+				debugf("[RyuNET NAT] INTRO %s -> %s (id=%X) claimed_src=%s mismatch=%v",
 					addr, to, buf[3:13], srcAddr, mismatch)
 			}
 			continue
@@ -121,7 +121,7 @@ func serveNAT(port int) {
 			resp = binary.LittleEndian.AppendUint16(resp, uint16(port))
 		default:
 			if cnt < 2 {
-				log.Printf("[RyuNET NAT] unknown packet from %s: %s", addr, hex.EncodeToString(buf[:n]))
+				debugf("[RyuNET NAT] unknown packet from %s: %s", addr, hex.EncodeToString(buf[:n]))
 				if dir := runDumpDir("nat"); dir != "" {
 					_ = os.WriteFile(filepath.Join(dir, fmt.Sprintf("unknown_%d.bin", connNum.Add(1))), buf[:n], 0o644)
 				}
@@ -131,7 +131,7 @@ func serveNAT(port int) {
 		if _, err := pc.WriteTo(resp, addr); err != nil {
 			log.Printf("[RyuNET NAT] reply to %s: %v", addr, err)
 		} else if cnt < 2 {
-			log.Printf("[RyuNET NAT] %s type %d -> %X", addr, buf[0], resp)
+			debugf("[RyuNET NAT] %s type %d -> %X", addr, buf[0], resp)
 		}
 	}
 }

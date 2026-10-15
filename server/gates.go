@@ -58,12 +58,12 @@ func admitPlayer(id *playerID, nnex, ip string) (bool, string) {
 	if isPS4 {
 		if id.PID == 0 {
 			// Should not happen (identity.go hashes), but allow as guest
-			log.Printf("[RyuNET Gates] PS4 %q has no PID: allowed as guest (localhost)", id.Username)
+			debugf("[RyuNET Gates] PS4 %q has no PID: allowed as guest (localhost)", id.Username)
 			return true, ""
 		}
 		// For localhost, skip Nextendo checks entirely
 		if !requireAccount && !requireSignedToken {
-			log.Printf("[RyuNET Gates] PS4 pid=%d %q kind=%s allowed (PS4 mode)", id.PID, id.Username, id.Kind)
+			debugf("[RyuNET Gates] PS4 pid=%d %q kind=%s allowed (PS4 mode)", id.PID, id.Username, id.Kind)
 			return true, ""
 		}
 		// If account required, still try online-check but fail-open
@@ -96,7 +96,7 @@ func admitPlayer(id *playerID, nnex, ip string) (bool, string) {
 		if requireAccount {
 			return false, "no account in the login token"
 		}
-		log.Printf("[RyuNET Gates] %q has no PID: allowed (REQUIRE_ACCOUNT=0)", id.Username)
+		debugf("[RyuNET Gates] %q has no PID: allowed (REQUIRE_ACCOUNT=0)", id.Username)
 		return true, ""
 	}
 	if allow, reason := nextendoOnlineCheck(id.PID, id.Kind, ip); !allow {

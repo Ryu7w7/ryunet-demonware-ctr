@@ -71,7 +71,7 @@ func (m *ctrMatchmaker) startMerge(dst *ctrRoom) []ctrNotice {
 	}
 	dst.version++
 	dst.hostDoc["update_id"] = dst.version
-	dst.host.conn.logf("CTR merge reserved source=%d destination=%d incoming=%d total=%d version=%d", src.id, dst.id, src.occupancy(), dst.occupancy(), dst.version)
+	dst.host.conn.debugf("CTR merge reserved source=%d destination=%d incoming=%d total=%d version=%d", src.id, dst.id, src.occupancy(), dst.occupancy(), dst.version)
 	return []ctrNotice{dst.notice(dst.host, ctrUpdateLobby)}
 }
 
@@ -94,7 +94,7 @@ func (m *ctrMatchmaker) finishMerge(dst *ctrRoom) []ctrNotice {
 		src.mergeTarget = 0
 		dst.version++
 		dst.hostDoc["update_id"] = dst.version
-		dst.host.conn.logf("CTR merge cancelled source=%d destination=%d", src.id, dst.id)
+		dst.host.conn.debugf("CTR merge cancelled source=%d destination=%d", src.id, dst.id)
 		return []ctrNotice{dst.notice(dst.host, ctrUpdateLobby)}
 	}
 	dst.mergeSource = nil
@@ -109,6 +109,6 @@ func (m *ctrMatchmaker) finishMerge(dst *ctrRoom) []ctrNotice {
 		out = append(out, ctrNotice{p.conn, ctrMergeLobby, []uint64{p.id, src.id, dst.id}, h, b})
 		dst.notified[p.conn] = true
 	}
-	dst.host.conn.logf("CTR merge dispatched source=%d destination=%d searches=%d total=%d", src.id, dst.id, len(src.players), dst.occupancy())
+	dst.host.conn.debugf("CTR merge dispatched source=%d destination=%d searches=%d total=%d", src.id, dst.id, len(src.players), dst.occupancy())
 	return out
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -141,7 +142,7 @@ func sendCTRNotices(notices []ctrNotice) {
 			ctrMM.leave(n.conn, 0)
 			_ = n.conn.c.Close()
 		} else {
-			n.conn.logf("CTR matchmaking push event=%d", n.event)
+			n.conn.debugf("CTR matchmaking push event=%d", n.event)
 		}
 	}
 }
@@ -222,9 +223,16 @@ func (r *ctrRoom) notice(p *ctrSearch, event uint32) ctrNotice {
 func (m *ctrMatchmaker) enqueue(s *ctrSearch) []ctrNotice {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Everyone in this search is now searching with it, so any older search or seat
+	// they hold is stale: a member who searched alone before joining the party would
+	// otherwise keep a reservation in another room and be counted twice.
+	searching := make(map[uint64]bool, len(s.doc.Members))
+	for _, pid := range s.doc.Members {
+		searching[pid] = true
+	}
 	// Retries must not match an account with itself or create duplicate searches.
 	for i := len(m.waiting) - 1; i >= 0; i-- {
-		if m.waiting[i].pid == s.pid {
+		if searching[m.waiting[i].pid] {
 			m.waiting = append(m.waiting[:i], m.waiting[i+1:]...)
 		}
 	}
@@ -234,18 +242,20 @@ func (m *ctrMatchmaker) enqueue(s *ctrSearch) []ctrNotice {
 	// answered with silence because the server still counted them as a member of
 	// a room they were never in. Evict them and let them match normally.
 	for roomID, r := range m.rooms {
-		if r.host.pid == s.pid {
+		if searching[r.host.pid] {
 			// The host re-queueing means that lobby is gone.
 			delete(m.rooms, roomID)
 			continue
 		}
-		for i, p := range r.players {
-			if p.pid == s.pid {
-				r.players = append(r.players[:i], r.players[i+1:]...)
+		kept := r.players[:0]
+		for _, p := range r.players {
+			if searching[p.pid] {
 				delete(r.notified, p.conn)
-				break
+				continue
 			}
+			kept = append(kept, p)
 		}
+		r.players = kept
 	}
 	rooms := make([]*ctrRoom, 0, len(m.rooms))
 	for _, r := range m.rooms {
@@ -280,7 +290,7 @@ func (m *ctrMatchmaker) enqueue(s *ctrSearch) []ctrNotice {
 		case r.lastHostSync > 0 && time.Now().Unix()-r.lastHostSync > 300:
 			reason = "host-stale"
 		}
-		s.conn.logf("CTR candidate search=%d seats=%d filter=%s room=%d room_filter=%s open=%t occupied=%d connected=%d capacity=%d search_max=%d reason=%s", s.id, s.seats, s.filterID, r.id, r.host.filterID, open, r.occupancy(), r.connected(), r.capacity, s.doc.Slots.Max, reason)
+		s.conn.debugf("CTR candidate search=%d seats=%d filter=%s room=%d room_filter=%s open=%t occupied=%d connected=%d capacity=%d search_max=%d reason=%s", s.id, s.seats, s.filterID, r.id, r.host.filterID, open, r.occupancy(), r.connected(), r.capacity, s.doc.Slots.Max, reason)
 		if reason == "selected" {
 			// A retry must not inherit its previous failed state in this room.
 			if states, ok := r.hostDoc["player_state"].(map[string]any); ok {
@@ -378,15 +388,24 @@ func (m *ctrMatchmaker) leave(conn *lobbyConn, id uint64) {
 		}
 	}
 }
+
+// documents answers getLobbyDocuments. Only the party leader searched, so only its
+// connection is in r.players; the other members follow it into the lobby and ask for
+// the same documents (host address, DTLS keys) from their own connections. Refusing
+// them left every follower unable to connect: the host timed them out (state 3) and
+// the party was split, which production showed for 83% of placed parties.
 func (m *ctrMatchmaker) documents(conn *lobbyConn, id uint64) (string, string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if r := m.rooms[id]; r != nil {
-		for _, p := range r.players {
-			if p.conn == conn {
-				h, b := r.documents()
-				return h, b, true
-			}
+	r := m.rooms[id]
+	if r == nil {
+		return "", "", false
+	}
+	pid := conn.pid()
+	for _, p := range r.players {
+		if p.conn == conn || (pid != 0 && slices.Contains(p.doc.Members, pid)) {
+			h, b := r.documents()
+			return h, b, true
 		}
 	}
 	return "", "", false
@@ -453,7 +472,7 @@ func (m *ctrMatchmaker) syncDoc(conn *lobbyConn, id, version uint64, raw string)
 	if released > 0 {
 		conn.logf("CTR released failed reservations room=%d seats=%d", r.id, released)
 	}
-	conn.logf("CTR room-state room=%d version=%d open=%v occupied=%d connected=%d searches=%d", r.id, r.version, doc["lobby_open"], r.occupancy(), r.connected(), len(r.players))
+	conn.debugf("CTR room-state room=%d version=%d open=%v occupied=%d connected=%d searches=%d", r.id, r.version, doc["lobby_open"], r.occupancy(), r.connected(), len(r.players))
 	// 2006 asks the host to produce a new document; it is not an ACK to
 	// broadcast. Echoing it on every sync causes an endless sync/push loop.
 	// Release pending guests only after the host has supplied its document.
@@ -483,7 +502,7 @@ func (m *ctrMatchmaker) syncDoc(conn *lobbyConn, id, version uint64, raw string)
 			r.players = append(r.players, p)
 			r.capacity = min(r.capacity, p.doc.Slots.Max)
 			added++
-			conn.logf("CTR backfill waiting search=%d seats=%d room=%d", p.id, p.seats, r.id)
+			conn.debugf("CTR backfill waiting search=%d seats=%d room=%d", p.id, p.seats, r.id)
 		}
 		m.waiting = remaining
 		if added > 0 {

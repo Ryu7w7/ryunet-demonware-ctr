@@ -102,7 +102,7 @@ func handleCTRUmbrella(w http.ResponseWriter, r *http.Request, body []byte, n ui
 		deny(500, "token generation failed")
 		return
 	}
-	log.Printf("[CTR Umbrella] #%d pid=%d -> 200 (lsg token issued)", n, id.PID)
+	debugf("[CTR Umbrella] #%d pid=%d -> 200 (lsg token issued)", n, id.PID)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(struct {
 		ID       uint64 `json:"umbrellaID"`

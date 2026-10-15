@@ -238,9 +238,9 @@ func (l *lobbyConn) onCTRStats(task byte, r *bdReader) []byte {
 		if err = ctrStats.write(writes); err != nil {
 			return fail(err)
 		}
-		l.logf("CTR stats saved pid=%d records=%d", pid, len(writes))
+		l.debugf("CTR stats saved pid=%d records=%d", pid, len(writes))
 		for _, row := range writes {
-			l.logf("CTR stats upload board=%d score=%d operation=%d", row.Board, row.Score, row.Operation)
+			l.debugf("CTR stats upload board=%d score=%d operation=%d", row.Board, row.Score, row.Operation)
 		}
 		return taskReply(task, 0, nil)
 	}
@@ -301,6 +301,6 @@ func (l *lobbyConn) onCTRStats(task byte, r *bdReader) []byte {
 	if task == 13 {
 		total = uint32(len(rows))
 	}
-	l.logf("CTR stats read task=%d board=%d rows=%d total=%d", task, board, len(rows), total)
+	l.debugf("CTR stats read task=%d board=%d rows=%d total=%d", task, board, len(rows), total)
 	return statsReply(task, rows, total)
 }

@@ -204,3 +204,45 @@ func TestParsePurchaseSkuFromRealCapture(t *testing.T) {
 		t.Fatalf("sku = %d (%#x), want 200085 (0x30f95)", sku, sku)
 	}
 }
+
+// PS4/PC sends octane_psn where Switch sends octane_switch; the rest of the request is
+// identical. Rejecting it is what made every Pit Stop purchase fail on PC.
+func TestParsePurchaseSkusAcceptsPSN(t *testing.T) {
+	sw, _ := hex.DecodeString(realPurchase)
+	psn := bytes.Replace(sw, []byte("octane_switch"), []byte("octane_psn"), 1)
+
+	kind, skus, ok := parsePurchaseSkus(psn)
+	if !ok || kind != "psn" || len(skus) != 1 || skus[0] != 0x00030f95 {
+		t.Fatalf("psn purchase = %q %v %v", kind, skus, ok)
+	}
+	if kind, _, ok := parsePurchaseSkus(sw); !ok || kind != "nintendo" {
+		t.Fatalf("switch purchase = %q %v", kind, ok)
+	}
+	bad := bytes.Replace(sw, []byte("octane_switch"), []byte("octane_xbox"), 1)
+	if _, _, ok := parsePurchaseSkus(bad); ok {
+		t.Fatal("unknown context accepted")
+	}
+}
+
+func TestBalancePushCarriesAccountType(t *testing.T) {
+	for _, kind := range []string{"psn", "nintendo"} {
+		if !bytes.Contains(balanceUpdatePayload(42, kind, 100), []byte(kind)) {
+			t.Fatalf("balance push lacks account type %q", kind)
+		}
+	}
+}
+
+func TestAccountTypeFollowsContext(t *testing.T) {
+	l := &lobbyConn{}
+	if l.acctType() != "psn" {
+		t.Fatalf("default account type = %q, want psn", l.acctType())
+	}
+	l.noteContext("octane_switch")
+	if l.acctType() != "nintendo" {
+		t.Fatalf("after octane_switch = %q", l.acctType())
+	}
+	l.noteContext("garbage")
+	if l.acctType() != "nintendo" {
+		t.Fatal("unknown context overwrote the account type")
+	}
+}

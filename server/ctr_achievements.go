@@ -28,7 +28,7 @@ func (l *lobbyConn) onAchievements(task byte, payload []byte) []byte {
 				return taskReply(task, errUnhandled, nil)
 			}
 			for _, e := range events {
-				l.logf("CTR reward event=%s timestamp=%d values=%v", e.Name, e.Timestamp, e.Values)
+				l.debugf("CTR reward event=%s timestamp=%d values=%v", e.Name, e.Timestamp, e.Values)
 			}
 			credit, err = economy.awardRaces(l.pid(), events, time.Now())
 			if err != nil {
@@ -48,11 +48,11 @@ func (l *lobbyConn) onAchievements(task byte, payload []byte) []byte {
 			credit += challengeCredit
 			updates = append(updates, challengeUpdates...)
 			if challengeCredit != 0 {
-				l.logf("CTR challenge reward=%d persisted", challengeCredit)
+				l.debugf("CTR challenge reward=%d persisted", challengeCredit)
 			}
 
 			if credit != 0 {
-				l.logf("CTR reward credit=%d currency=10 persisted", credit)
+				l.debugf("CTR reward credit=%d currency=10 persisted", credit)
 			}
 		}
 		l.afterReply = func() {
@@ -66,7 +66,7 @@ func (l *lobbyConn) onAchievements(task byte, payload []byte) []byte {
 				l.logf("CTR achievements push: %v", err)
 				return
 			}
-			l.logf("CTR achievements -> push %d achievements-updated", pushAchievementsUpdated)
+			l.debugf("CTR achievements -> push %d achievements-updated", pushAchievementsUpdated)
 		}
 		return structTaskReply(task, nil)
 
@@ -90,7 +90,7 @@ func (l *lobbyConn) onAchievements(task byte, payload []byte) []byte {
 	case taskGetUserState:
 		// field 1 is the engine's user-state blob. Empty JSON keeps it valid and lets
 		// handleGetUserState fire CAEUserStateRefreshed, which is the refresh confirmation.
-		l.logf("CTR achievements getUserState -> empty state")
+		l.debugf("CTR achievements getUserState -> empty state")
 		return structTaskReply(task, pbBytesField(nil, 1, []byte("{}")))
 	}
 	// reportEvents and the activate/claim tasks take a request and return no body.

@@ -26,6 +26,7 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"os"
 	"strconv"
 )
@@ -38,14 +39,46 @@ const (
 	taskSwitchReconciliation  = 246
 )
 
+// octaneAccountType maps a marketplace context to the bdUserAccountID account type
+// the client expects on inventory owners and balance pushes.
+func octaneAccountType(ctx string) (string, bool) {
+	switch ctx {
+	case "octane_psn":
+		return "psn", true
+	case "octane_switch":
+		return "nintendo", true
+	}
+	return "", false
+}
+
+// acctType is the account type seen on this connection. PS4/PC is the platform
+// this server targets, so it is the default before any context has been read.
+func (l *lobbyConn) acctType() string {
+	if l.accountType == "" {
+		return "psn"
+	}
+	return l.accountType
+}
+
+func (l *lobbyConn) noteContext(ctx string) {
+	if kind, ok := octaneAccountType(ctx); ok {
+		l.accountType = kind
+	}
+}
+
 // Wumpa Coins, Nitro Boost, Free Nitro Boost, in the original catalog order.
 func currencyIDs() []uint64 { return []uint64{10, 11, 12} }
 
+// defaultStartBalance is the Wumpa Coins a brand-new wallet is created with.
+const defaultStartBalance = 10000
+
+// startingBalance only applies when a wallet is first created; existing wallets keep
+// their balance.
 func startingBalance() int64 {
-	if n, err := strconv.ParseInt(envOr("CTR_START_BALANCE", "0"), 10, 64); err == nil && n >= 0 {
+	if n, err := strconv.ParseInt(envOr("CTR_START_BALANCE", strconv.Itoa(defaultStartBalance)), 10, 64); err == nil && n >= 0 {
 		return n
 	}
-	return 0
+	return defaultStartBalance
 }
 
 func loadWallets() {
@@ -109,6 +142,7 @@ func (l *lobbyConn) onMarketplace(task byte, payload []byte) []byte {
 	switch task {
 	case taskGetBalancesV3:
 		ctx, max := parseBalancesRequest(payload)
+		l.noteContext(ctx)
 		a, err := economy.snapshot(l.pid())
 		if err != nil {
 			l.logf("CTR economy read failed: %v", err)
@@ -116,22 +150,25 @@ func (l *lobbyConn) onMarketplace(task byte, payload []byte) []byte {
 		}
 		w := a.Balances
 		sb := getPlayerBalancesResponse(w, max)
-		l.logf("CTR pitstop balances ctx=%q max=%d -> %d currencies", ctx, max, len(currencyIDs()))
+		l.debugf("CTR pitstop balances ctx=%q max=%d -> %d currencies", ctx, max, len(currencyIDs()))
 		return structTaskReply(task, sb)
 
 	case taskSwitchReconciliation:
 		// The request carries an eShop receipt. Nothing was bought with real money on a
 		// private server, so acknowledge with an empty response rather than failing the
 		// task, which would stall Pit Stop's startup.
-		l.logf("CTR pitstop switchReconciliation -> ack")
+		l.debugf("CTR pitstop switchReconciliation -> ack")
 		return structTaskReply(task, nil)
 
 	case taskGetInventoryPaginated:
 		r := &bdReader{b: payload, off: 3}
 		ctx, err := r.str()
-		if err != nil || ctx != "octane_switch" {
+		kind, ok := octaneAccountType(ctx)
+		if err != nil || !ok {
+			l.logf("CTR pitstop inventory rejected ctx=%q:\n%s", ctx, hex.Dump(payload))
 			return taskReply(task, errUnhandled, nil)
 		}
+		l.accountType = kind
 		page, err := r.u32()
 		if err != nil {
 			return taskReply(task, errUnhandled, nil)
@@ -146,18 +183,20 @@ func (l *lobbyConn) onMarketplace(task byte, payload []byte) []byte {
 			return taskReply(task, errUnhandled, nil)
 		}
 		items := inventoryPage(a, page, size)
-		l.logf("CTR pitstop inventory page=%d size=%d -> %d items", page, size, len(items))
+		l.debugf("CTR pitstop inventory page=%d size=%d -> %d items", page, size, len(items))
 		return taskReply(task, 0, func(w *bdWriter) uint32 {
 			for _, item := range items {
-				writeInventoryItem(w, l.pid(), item)
+				writeInventoryItem(w, l.pid(), kind, item)
 			}
 			return uint32(len(items))
 		})
 	case taskPurchaseSkus:
-		skus, ok := parsePurchaseSkus(payload)
+		kind, skus, ok := parsePurchaseSkus(payload)
 		if !ok {
+			l.logf("CTR pitstop purchase request unreadable:\n%s", hex.Dump(payload))
 			return taskReply(task, errUnhandled, nil)
 		}
+		l.accountType = kind
 		debit, err := economy.purchase(l.pid(), skus)
 		if err != nil {
 			l.logf("CTR pitstop purchase rejected: %v", err)
@@ -247,52 +286,54 @@ func (w *bdWriter) i64(v int64) {
 // each value comes from were read from bdMarketplaceInventory::serialize; field 3 (+0x48)
 // is the item id CMarketplaceInventoryItem::populateItem matches against the game's own
 // catalog, so it carries the catalog ITEM id granted by the SKU.
-func writeInventoryItem(w *bdWriter, owner uint64, item uint32) {
-	w.u64(owner)       // bdUserAccountID owner
-	w.strv("nintendo") // bdUserAccountID account type
-	w.u32(item)        // catalog item ID, not SKU
-	w.u32(1)           // +0x4c quantity
-	w.u32(0)           // +0x50
-	w.blobv(nil)       // +0x54 item data
-	w.u32(0)           // +0x98
-	w.i64(0)           // +0xa0 expiry, 0 = never
-	w.u16(0)           // +0xa8
-	w.u32(0)           // +0xac
+func writeInventoryItem(w *bdWriter, owner uint64, kind string, item uint32) {
+	w.u64(owner) // bdUserAccountID owner
+	w.strv(kind) // bdUserAccountID account type
+	w.u32(item)  // catalog item ID, not SKU
+	w.u32(1)     // +0x4c quantity
+	w.u32(0)     // +0x50
+	w.blobv(nil) // +0x54 item data
+	w.u32(0)     // +0x98
+	w.i64(0)     // +0xa0 expiry, 0 = never
+	w.u16(0)     // +0xa8
+	w.u32(0)     // +0xac
 }
 
 // purchaseSkus encodes arrays as count followed by typed elements.
 // CTR cosmetics are non-consumable: quantities other than one are rejected.
-func parsePurchaseSkus(payload []byte) ([]uint32, bool) {
+// The returned kind is the account type for the request's context.
+func parsePurchaseSkus(payload []byte) (string, []uint32, bool) {
 	r := &bdReader{b: payload, off: 3}
 	ctx, err := r.str()
-	if err != nil || ctx != "octane_switch" {
-		return nil, false
+	kind, ok := octaneAccountType(ctx)
+	if err != nil || !ok {
+		return "", nil, false
 	}
 	n, err := r.u32()
 	if err != nil || n == 0 || n > 255 {
-		return nil, false
+		return "", nil, false
 	}
 	skus := make([]uint32, n)
 	for i := range skus {
 		skus[i], err = r.u32()
 		if err != nil {
-			return nil, false
+			return "", nil, false
 		}
 	}
 	qn, err := r.u32()
 	if err != nil || qn != n {
-		return nil, false
+		return "", nil, false
 	}
 	for range skus {
 		q, e := r.u32()
 		if e != nil || q != 1 {
-			return nil, false
+			return "", nil, false
 		}
 	}
-	return skus, true
+	return kind, skus, true
 }
 func parsePurchaseSku(payload []byte) (uint32, bool) {
-	ids, ok := parsePurchaseSkus(payload)
+	_, ids, ok := parsePurchaseSkus(payload)
 	if !ok || len(ids) != 1 {
 		return 0, false
 	}

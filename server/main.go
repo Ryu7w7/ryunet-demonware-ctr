@@ -141,6 +141,7 @@ func loadEnvFile() {
 		pubDir = envOr("RYUNET_PUBFILES", envOr("D3_PUBFILES", "pubfiles"))
 		dumpRoot = envOr("RYUNET_DUMPS", envOr("D3_DUMPS", "off"))
 		verbose = os.Getenv("RYUNET_VERBOSE") == "1" || os.Getenv("D3_VERBOSE") == "1"
+		logDebug = debugLevel()
 		break
 	}
 }

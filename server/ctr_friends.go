@@ -34,7 +34,7 @@ import (
 
 func handleCTRFriends(w http.ResponseWriter, r *http.Request, body []byte, n uint64, dumps string) {
 	q := r.URL.Query()
-	log.Printf("[CTR Friends] #%d %s %s%s from %s (%d bytes body) context=%q client=%q",
+	debugf("[CTR Friends] #%d %s %s%s from %s (%d bytes body) context=%q client=%q",
 		n, r.Method, r.Host, r.URL.RequestURI(), r.RemoteAddr, len(body),
 		q.Get("context"), q.Get("client"))
 	if dumps != "" && len(body) > 0 {

@@ -120,12 +120,12 @@ func TestEconomyBundleOnlyChargesUnownedComponents(t *testing.T) {
 func TestInventoryOwnerAndCatalogItem(t *testing.T) {
 	item := economyCatalog[200085].Items[0]
 	w := &bdWriter{}
-	writeInventoryItem(w, 42, item)
+	writeInventoryItem(w, 42, "psn", item)
 	r := &bdReader{b: w.b}
 	owner, _ := r.u64()
 	kind, _ := r.str()
 	id, _ := r.u32()
-	if owner != 42 || kind != "nintendo" || id != item {
+	if owner != 42 || kind != "psn" || id != item {
 		t.Fatalf("bad inventory owner/item %d %s %d", owner, kind, id)
 	}
 }
@@ -138,6 +138,27 @@ func TestInventoryPagesAreOneBased(t *testing.T) {
 		t.Fatalf("bad pages %v %v", first, second)
 	}
 }
+
+// Without CTR_START_BALANCE a new wallet starts with 10000 Wumpa Coins, and an
+// existing wallet is never topped up again.
+func TestNewWalletDefaultStartBalance(t *testing.T) {
+	t.Setenv("CTR_START_BALANCE", "")
+	s := &economyStore{dir: t.TempDir()}
+	a, err := s.snapshot(42)
+	if err != nil || a.Balances[wumpaCurrency] != 10000 {
+		t.Fatalf("new wallet balance = %d %v, want 10000", a.Balances[wumpaCurrency], err)
+	}
+	if _, err := s.purchase(42, []uint32{200085}); err != nil {
+		t.Fatal(err)
+	}
+	spent, _ := s.snapshot(42)
+	s = &economyStore{dir: s.dir}
+	again, _ := s.snapshot(42)
+	if again.Balances[wumpaCurrency] != spent.Balances[wumpaCurrency] || again.Balances[wumpaCurrency] >= 10000 {
+		t.Fatalf("existing wallet reset to %d", again.Balances[wumpaCurrency])
+	}
+}
+
 func TestEconomyInsufficientFunds(t *testing.T) {
 	t.Setenv("CTR_START_BALANCE", "0")
 	s := &economyStore{dir: t.TempDir()}

@@ -100,7 +100,7 @@ func startPresenceReporter() {
 				}
 				resp.Body.Close()
 				if resp.StatusCode != http.StatusOK || len(pids) != lastLogged[app] {
-					log.Printf("[presence] app=%s %d player(s) %v -> HTTP %d", app, len(pids), pids, resp.StatusCode)
+					debugf("[presence] app=%s %d player(s) %v -> HTTP %d", app, len(pids), pids, resp.StatusCode)
 					lastLogged[app] = len(pids)
 				}
 			}

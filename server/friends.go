@@ -300,7 +300,7 @@ func (l *lobbyConn) onGetUserNames(task byte, r *bdReader) []byte {
 			hits = append(hits, hit{id, name})
 		}
 	}
-	l.logf("friends getUserNames %d request(s) -> %d online %v", len(ids), len(hits), hits)
+	l.debugf("friends getUserNames %d request(s) -> %d online %v", len(ids), len(hits), hits)
 	return taskReply(task, 0, func(w *bdWriter) uint32 {
 		for _, h := range hits {
 			w.u64(h.id)
@@ -335,7 +335,7 @@ func (l *lobbyConn) onResolveNicks(task byte, r *bdReader) []byte {
 			hits = append(hits, hit{p.PID, p.Username})
 		}
 	}
-	l.logf("friends resolveNicks %d request(s) -> %d online %v", n, len(hits), hits)
+	l.debugf("friends resolveNicks %d request(s) -> %d online %v", n, len(hits), hits)
 	return taskReply(task, 0, func(w *bdWriter) uint32 {
 		for _, h := range hits {
 			w.u64(h.id)
@@ -352,13 +352,13 @@ func (l *lobbyConn) onUserData(task byte, r *bdReader) []byte {
 	case 1:
 		data, err := r.blob()
 		if err != nil || l.player == nil {
-			l.logf("userdata SET ctx=%q ignored (%v, player=%v)", ctx, err, l.player != nil)
+			l.debugf("userdata SET ctx=%q ignored (%v, player=%v)", ctx, err, l.player != nil)
 			return taskReply(task, 0, nil)
 		}
 		userDataMu.Lock()
 		userData[strings.ToLower(l.player.Username)+"|"+ctx] = data
 		userDataMu.Unlock()
-		l.logf("userdata SET %s ctx=%q %d bytes", l.player.Username, ctx, len(data))
+		l.debugf("userdata SET %s ctx=%q %d bytes", l.player.Username, ctx, len(data))
 		return taskReply(task, 0, nil)
 	case 4:
 		if r.off < len(r.b) && r.b[r.off] == tagBool {
@@ -382,7 +382,7 @@ func (l *lobbyConn) onUserData(task byte, r *bdReader) []byte {
 				hits = append(hits, hit{id, d})
 			}
 		}
-		l.logf("userdata GET ctx=%q %d request(s) -> %d", ctx, len(ids), len(hits))
+		l.debugf("userdata GET ctx=%q %d request(s) -> %d", ctx, len(ids), len(hits))
 		return taskReply(task, 0, func(w *bdWriter) uint32 {
 			for _, h := range hits {
 				w.u64(h.id)

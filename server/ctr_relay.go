@@ -156,7 +156,7 @@ func withRelay(hostAddr []byte, hostPID, joinerPID uint64) []byte {
 			continue // already occupied
 		}
 		writeAddrSlot(out[off:off+relayAddrLen], &net.UDPAddr{IP: relay.ip, Port: p.port})
-		log.Printf("[CTR Relay] offered :%d to pid=%d for host=%d (slot %d)", p.port, joinerPID, hostPID, slot)
+		debugf("[CTR Relay] offered :%d to pid=%d for host=%d (slot %d)", p.port, joinerPID, hostPID, slot)
 		return out
 	}
 	return hostAddr
@@ -191,7 +191,7 @@ func (t *relayTable) pairFor(hostPID, joinerPID uint64, host *net.UDPAddr) *rela
 		p := &relayPair{port: port, host: host, conn: conn, last: time.Now()}
 		t.pairs[key], t.byPort[port] = p, p
 		go p.serve()
-		log.Printf("[CTR Relay] pair %d<->%d on :%d (host %s)", hostPID, joinerPID, port, host)
+		debugf("[CTR Relay] pair %d<->%d on :%d (host %s)", hostPID, joinerPID, port, host)
 		return p
 	}
 	log.Printf("[CTR Relay] no free port for %d<->%d", hostPID, joinerPID)
@@ -212,7 +212,7 @@ func (p *relayPair) serve() {
 		fromHost := host != nil && src.IP.Equal(host.IP) && src.Port == host.Port
 		if !fromHost && (joiner == nil || !src.IP.Equal(joiner.IP) || src.Port != joiner.Port) {
 			p.joiner, joiner = src, src
-			log.Printf("[CTR Relay] :%d FIRST PACKET from %s (%d bytes) — the game DOES use relay slots",
+			debugf("[CTR Relay] :%d FIRST PACKET from %s (%d bytes) — the game DOES use relay slots",
 				p.port, src, n)
 		}
 		p.last = time.Now()

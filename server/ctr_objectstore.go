@@ -86,6 +86,6 @@ func (l *lobbyConn) onObjectStore(task byte, payload []byte) []byte {
 
 	resp := ctrObjectsResponse{Objects: objects}
 	body, _ := json.Marshal(resp)
-	l.logf("task bdObjectStore task=%d -> HTTP 200 (%d objects, %d bytes)", task, len(objects), len(body))
+	l.debugf("task bdObjectStore task=%d -> HTTP 200 (%d objects, %d bytes)", task, len(objects), len(body))
 	return httpProxyReply(task, 200, body)
 }
