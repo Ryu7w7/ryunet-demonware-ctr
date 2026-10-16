@@ -74,6 +74,7 @@ type ctrMatchmaker struct {
 	mu      sync.Mutex
 	waiting []*ctrSearch
 	rooms   map[uint64]*ctrRoom
+	reach   ctrReach // which hosts joiners reach (ctr_reach.go)
 }
 
 var ctrMM = ctrMatchmaker{rooms: make(map[uint64]*ctrRoom)}
@@ -260,6 +261,7 @@ func (m *ctrMatchmaker) enqueue(s *ctrSearch) []ctrNotice {
 		}
 		r.players = kept
 	}
+	now := time.Now().Unix()
 	rooms := make([]*ctrRoom, 0, len(m.rooms))
 	for _, r := range m.rooms {
 		rooms = append(rooms, r)
@@ -277,6 +279,7 @@ func (m *ctrMatchmaker) enqueue(s *ctrSearch) []ctrNotice {
 		}
 		open, _ := r.hostDoc["lobby_open"].(bool)
 		reason := "selected"
+		avoid := m.reach.avoid(r.host.pid, s, now)
 		switch {
 		case r.mergeTarget != 0 || r.mergeSource != nil:
 			reason = "merge-pending"
@@ -292,6 +295,8 @@ func (m *ctrMatchmaker) enqueue(s *ctrSearch) []ctrNotice {
 			reason = "host-unresponsive"
 		case r.lastHostSync > 0 && time.Now().Unix()-r.lastHostSync > 300:
 			reason = "host-stale"
+		case avoid != "":
+			reason = avoid
 		}
 		s.conn.debugf("CTR candidate search=%d seats=%d filter=%s room=%d room_filter=%s open=%t occupied=%d connected=%d capacity=%d search_max=%d reason=%s", s.id, s.seats, s.filterID, r.id, r.host.filterID, open, r.occupancy(), r.connected(), r.capacity, s.doc.Slots.Max, reason)
 		if reason == "selected" {
@@ -331,7 +336,7 @@ func (m *ctrMatchmaker) enqueue(s *ctrSearch) []ctrNotice {
 	if seats < minimum {
 		return nil
 	}
-	h := group[0]
+	h := m.reach.pickHost(group, now)
 	r := &ctrRoom{id: ctrIDs.Add(1), version: 1, created: time.Now().Unix(), host: h, players: group, capacity: maximum, notified: map[*lobbyConn]bool{h.conn: true}}
 	r.hostDoc = map[string]any{
 		"update_id": r.version, "update_time": r.created, "game_id": r.id, "lobby_open": true, "lobby_open_for_pres_join": true,
@@ -446,6 +451,7 @@ func (m *ctrMatchmaker) syncDoc(conn *lobbyConn, id, version uint64, raw string)
 	r.lastHostSync = time.Now().Unix()
 	r.pendingGuest = false
 	r.hostDoc = doc
+	m.noteOutcomes(r, r.lastHostSync)
 	mergeNotices := m.finishMerge(r)
 	// Remove only members the host explicitly rejected. Keep connected party
 	// members, and do not expire a reservation merely because time passed here.
@@ -496,7 +502,8 @@ func (m *ctrMatchmaker) syncDoc(conn *lobbyConn, id, version uint64, raw string)
 		remaining := m.waiting[:0]
 		added := 0
 		for _, p := range m.waiting {
-			if p.filter != r.host.filter || r.occupancy()+p.seats > min(r.capacity, p.doc.Slots.Max) {
+			if p.filter != r.host.filter || r.occupancy()+p.seats > min(r.capacity, p.doc.Slots.Max) ||
+				m.reach.avoid(r.host.pid, p, r.lastHostSync) != "" {
 				remaining = append(remaining, p)
 				continue
 			}
