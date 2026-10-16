@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const natSeenMax = 4096
@@ -88,6 +89,7 @@ func serveNAT(port int) {
 		log.Printf("[RyuNET NAT] listening UDP %d (announced server ip %s)", port, serverIP)
 	}
 
+	go tunnelReporter()
 	buf := make([]byte, 2048)
 	for {
 		n, addr, err := pc.ReadFrom(buf)
@@ -96,6 +98,9 @@ func serveNAT(port int) {
 		}
 		ua, ok := addr.(*net.UDPAddr)
 		if !ok || ua.IP.To4() == nil {
+			continue
+		}
+		if handleTunnel(pc, buf[:n], ua, time.Now()) {
 			continue
 		}
 		sig := fmt.Sprintf("%X", buf[:n])
