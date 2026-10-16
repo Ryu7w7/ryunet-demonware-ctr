@@ -27,6 +27,7 @@ package main
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"log"
 	"os"
 	"strconv"
 )
@@ -86,6 +87,7 @@ func loadWallets() {
 	if err := os.MkdirAll(economy.dir, 0755); err != nil {
 		panic(err)
 	}
+	log.Printf("[RyuNET Economy] Pit Stop inventory: %s (CTR_INVENTORY)", inventoryMode())
 }
 
 // ---- protobuf -------------------------------------------------------------
@@ -177,12 +179,22 @@ func (l *lobbyConn) onMarketplace(task byte, payload []byte) []byte {
 		if err != nil || size == 0 || size > 4096 {
 			return taskReply(task, errUnhandled, nil)
 		}
-		a, err := economy.snapshot(l.pid())
-		if err != nil {
-			l.logf("CTR economy inventory failed: %v", err)
+		var items []uint32
+		switch mode := l.inventoryModeFor(); mode {
+		case "save":
+			// As before octane_psn was accepted: the game keeps its save's items (ctr_economy.go).
+			l.debugf("CTR pitstop inventory refused: this player keeps their save's items")
 			return taskReply(task, errUnhandled, nil)
+		case "all":
+			items = pageOf(allCatalogItems(), page, size)
+		default:
+			a, err := economy.snapshot(l.pid())
+			if err != nil {
+				l.logf("CTR economy inventory failed: %v", err)
+				return taskReply(task, errUnhandled, nil)
+			}
+			items = inventoryPage(a, page, size)
 		}
-		items := inventoryPage(a, page, size)
 		l.debugf("CTR pitstop inventory page=%d size=%d -> %d items", page, size, len(items))
 		return taskReply(task, 0, func(w *bdWriter) uint32 {
 			for _, item := range items {
@@ -191,6 +203,12 @@ func (l *lobbyConn) onMarketplace(task byte, payload []byte) []byte {
 			return uint32(len(items))
 		})
 	case taskPurchaseSkus:
+		if l.inventoryModeFor() == "save" {
+			// The game would only show the item through the server's inventory, which these
+			// players do not get: refuse before any coin is spent, as before the fix.
+			l.debugf("CTR pitstop purchase refused: this player keeps their save's items")
+			return taskReply(task, errUnhandled, nil)
+		}
 		kind, skus, ok := parsePurchaseSkus(payload)
 		if !ok {
 			l.logf("CTR pitstop purchase request unreadable:\n%s", hex.Dump(payload))

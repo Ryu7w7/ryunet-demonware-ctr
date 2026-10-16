@@ -160,6 +160,7 @@ func main() {
 	}
 	loadGates()
 	loadWallets()
+	loadNickClaims()
 
 	go startDashboard()
 	startPresenceReporter()

@@ -55,6 +55,22 @@ func authHandler(dumps string, ctrSigner *ctrAuthSigner) http.HandlerFunc {
 			handleCTRFriends(w, r, body, n, dumps)
 			return
 		}
+		if r.URL.Path == "/ryunet/nick" {
+			handleNickCheck(w, r)
+			return
+		}
+		if r.URL.Path == "/ryunet/discord/link" || r.URL.Path == "/ryunet/discord/unlink" {
+			handleDiscordLink(w, r, body)
+			return
+		}
+		if r.URL.Path == "/ryunet/announce" {
+			handleAnnounce(w, r)
+			return
+		}
+		if r.URL.Path == "/ryunet/party" {
+			handlePartyInfo(w, r)
+			return
+		}
 
 		// Request line only: the body carries the player's NSA id_token.
 		debugf("[RyuNET Auth] #%d %s %s%s from %s (%d bytes)", n, r.Method, r.Host, r.URL.RequestURI(), r.RemoteAddr, len(body))
@@ -88,6 +104,16 @@ func authHandler(dumps string, ctrSigner *ctrAuthSigner) http.HandlerFunc {
 			log.Printf("[RyuNET Auth] #%d %q pid=%d kind=%s REFUSED (%s)", n, id.Username, id.PID, id.Kind, reason)
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
+		}
+		// PS4/PC: the PID comes from the nickname alone, so the nickname must belong to this
+		// installation (nick_claims.go).
+		if id.Kind == "ps4" || id.Kind == "shadps4" {
+			if ok, reason := nicks.admit(id.Username, r.Header.Get(nickKeyHeader)); !ok {
+				log.Printf("[RyuNET Auth] #%d %q pid=%d kind=%s REFUSED (%s)", n, id.Username, id.PID, id.Kind, reason)
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			id.SaveInventory = strings.EqualFold(strings.TrimSpace(r.Header.Get(inventoryHeader)), "save")
 		}
 
 		// The client reads the ticket's first 4 bytes and compares them to the

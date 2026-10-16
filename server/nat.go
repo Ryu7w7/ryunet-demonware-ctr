@@ -44,6 +44,33 @@ var (
 	natIntros atomic.Int64       // introductions relayed, for the dashboard
 )
 
+// announcedIP is the server address a NAT reply names. RYUNET_HOST=0.0.0.0 has no single
+// right answer (a LAN or VPN server is reached at a different address by each player), so each
+// player gets the address of this machine that the OS routes to them: the Radmin/ZeroTier one
+// for a VPN friend, the LAN one at home, 127.0.0.1 locally.
+func announcedIP(serverIP, client net.IP) net.IP {
+	if !serverIP.IsUnspecified() {
+		return serverIP
+	}
+	key := client.String()
+	if ip, ok := natLocalIPs.Load(key); ok {
+		return ip.(net.IP)
+	}
+	ip := net.IPv4(127, 0, 0, 1).To4()
+	// Connecting a UDP socket sends nothing: it only asks the OS which source address and
+	// interface it would use for that destination.
+	if c, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: client, Port: 9}); err == nil {
+		if local, ok := c.LocalAddr().(*net.UDPAddr); ok && local.IP.To4() != nil {
+			ip = local.IP.To4()
+		}
+		c.Close()
+	}
+	natLocalIPs.Store(key, ip)
+	return ip
+}
+
+var natLocalIPs sync.Map // client IP -> the local address announced to it (RYUNET_HOST=0.0.0.0)
+
 func serveNAT(port int) {
 	pc, err := net.ListenPacket("udp", fmt.Sprintf(":%d", port))
 	if err != nil {
@@ -55,7 +82,11 @@ func serveNAT(port int) {
 		log.Printf("[RyuNET NAT] RYUNET_HOST=%q could not be resolved to an IPv4 address: announcing 127.0.0.1", nextendoHost)
 		serverIP = net.IPv4(127, 0, 0, 1).To4()
 	}
-	log.Printf("[RyuNET NAT] listening UDP %d (announced server ip %s)", port, serverIP)
+	if serverIP.IsUnspecified() {
+		log.Printf("[RyuNET NAT] listening UDP %d (RYUNET_HOST=0.0.0.0: announcing to each player the address of this machine that reaches it)", port)
+	} else {
+		log.Printf("[RyuNET NAT] listening UDP %d (announced server ip %s)", port, serverIP)
+	}
 
 	buf := make([]byte, 2048)
 	for {
@@ -117,7 +148,7 @@ func serveNAT(port int) {
 			resp = append(resp, 21, 2, 0)
 			resp = append(resp, ua.IP.To4()...)
 			resp = binary.LittleEndian.AppendUint16(resp, uint16(ua.Port))
-			resp = append(resp, serverIP...)
+			resp = append(resp, announcedIP(serverIP, ua.IP)...)
 			resp = binary.LittleEndian.AppendUint16(resp, uint16(port))
 		default:
 			if cnt < 2 {

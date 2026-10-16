@@ -96,6 +96,11 @@ func startCTRRelay(low, high int, host string) {
 		log.Printf("[CTR Relay] disabled (host=%q ports %d-%d)", host, low, high)
 		return
 	}
+	if ip.IsUnspecified() {
+		// Joiners are handed this address to send their game traffic to.
+		log.Printf("[CTR Relay] disabled: RYUNET_HOST=%q is not an address players can reach", host)
+		return
+	}
 	relay.mu.Lock()
 	relay.low, relay.high, relay.next, relay.ip = low, high, low, ip
 	relay.mu.Unlock()

@@ -397,6 +397,8 @@ func startDashboard() {
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(buildGameStats(r.URL.Query().Get("game")))
 	})
+	mux.HandleFunc("/api/nick/release", handleNickRelease(token))
+	mux.HandleFunc("/api/announce", handleAnnounceAdmin(token))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintln(w, "ok") })
 
 	log.Printf("[RyuNET Dashboard] stats API on :%s (token=%v)", port, token != "")

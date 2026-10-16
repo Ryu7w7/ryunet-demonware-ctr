@@ -24,6 +24,8 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -246,6 +248,34 @@ func (l *lobbyConn) onFriendSessions(task byte, r *bdReader, context string) []b
 		}
 		return uint32(len(found))
 	})
+}
+
+// handlePartyInfo answers GET /ryunet/party?name=<nickname>: the size of the lobby that player
+// hosts, which every CTR player does from login (their party, or their private room). The
+// launcher shows it in Discord and offers "Join" only while there is room. A player hosting
+// nothing, or whose host connection is gone, gets players 0.
+func handlePartyInfo(w http.ResponseWriter, r *http.Request) {
+	var players, maxPlayers uint32
+	if name := r.URL.Query().Get("name"); validNick(name) {
+		pid := calcPS4ID(name, true)
+		sessionsMu.Lock()
+		var best *mmSession
+		for _, s := range sessions {
+			if s.ownerPID != pid || s.owner == 0 || s.reserved || !strings.HasPrefix(s.context, "ctr:") {
+				continue
+			}
+			if best == nil || s.updated.After(best.updated) {
+				best = s
+			}
+		}
+		if best != nil {
+			players, maxPlayers = best.numPlayers, best.maxPlayers
+		}
+		sessionsMu.Unlock()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]uint32{"players": players, "max": maxPlayers})
 }
 
 // onMatchMaking handles service 21. Returns nil if the task isn't handled.

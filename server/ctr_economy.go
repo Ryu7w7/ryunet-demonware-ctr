@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -205,6 +206,60 @@ func (s *economyStore) purchase(pid uint64, skus []uint32) (int64, error) {
 	return total, nil
 }
 
+// inventoryMode decides which Pit Stop items the game sees as owned while online
+// (CTR_INVENTORY). The game keeps two inventories: its save's (_localMarketplaceInventory)
+// and Demonware's (_dwInventoryItems), and online it goes by Demonware's once it gets one;
+// after a purchase it asks for Demonware's again to show what was bought. Until octane_psn
+// was accepted every inventory request failed, so PS4/PC players always played with their
+// save's items, imported "100%" saves included.
+//
+//	server  items bought on this server, per nickname (default). A player can still
+//	        choose "save" for themselves in the launcher (inventoryHeader).
+//	all     every catalog item, for everyone
+//	save    everyone keeps their save's items, as before ("local" is the same)
+func inventoryMode() string {
+	switch m := strings.ToLower(strings.TrimSpace(os.Getenv("CTR_INVENTORY"))); m {
+	case "all", "save":
+		return m
+	case "local":
+		return "save"
+	}
+	return "server"
+}
+
+// inventoryHeader carries the launcher's per-player choice at login: "save" keeps the Pit
+// Stop items of the player's own save (a "100%" save, say) instead of the ones bought on
+// the server. Those players buy nothing, since the game would only show a purchase through
+// the server's inventory: their coins are never spent on an item they would not see.
+const inventoryHeader = "X-RyuNET-Inventory"
+
+// inventoryModeFor is the server-wide mode, or this player's choice when it is "server".
+func (l *lobbyConn) inventoryModeFor() string {
+	if m := inventoryMode(); m != "server" {
+		return m
+	}
+	if l.player != nil && l.player.SaveInventory {
+		return "save"
+	}
+	return "server"
+}
+
+// allCatalogItems is every item a Pit Stop SKU can grant, sorted (CTR_INVENTORY=all).
+var allCatalogItems = sync.OnceValue(func() []uint32 {
+	seen := map[uint32]bool{}
+	var items []uint32
+	for _, sku := range economyCatalog {
+		for _, id := range sku.Items {
+			if !seen[id] {
+				seen[id] = true
+				items = append(items, id)
+			}
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i] < items[j] })
+	return items
+})
+
 func inventoryPage(a *economyAccount, page, size uint32) []uint32 {
 	items := make([]uint32, 0, len(a.Items))
 	for id, owned := range a.Items {
@@ -213,6 +268,11 @@ func inventoryPage(a *economyAccount, page, size uint32) []uint32 {
 		}
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i] < items[j] })
+	return pageOf(items, page, size)
+}
+
+// pageOf returns one page of a sorted item list; pages count from 1.
+func pageOf(items []uint32, page, size uint32) []uint32 {
 	// CMarketplaceGetInventoryTask::start explicitly requests page 1 first.
 	if page == 0 {
 		return nil

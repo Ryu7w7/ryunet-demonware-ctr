@@ -37,6 +37,10 @@ type playerID struct {
 	Sub      string `json:"sub"`
 	Kind     string `json:"kind,omitempty"` // "switch" or "ryujinx" (emulator), see identity.go
 
+	// The player chose, in the launcher, to keep the Pit Stop items of their own save
+	// (X-RyuNET-Inventory: save at login): ctr_economy.go inventoryMode.
+	SaveInventory bool `json:"save_inventory,omitempty"`
+
 	// Demonware title this connection announced (5745 Diablo III, 5775 Crash Team
 	// Racing). Taken from the ticket, never from the stored identity file: one
 	// account can play either game, and presence must name the right one.
