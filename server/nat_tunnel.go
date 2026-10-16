@@ -40,7 +40,7 @@ var (
 )
 
 const (
-	tunnelHeaderLen = 13              // magic + flags + ip + port
+	tunnelHeaderLen = 13               // magic + flags + ip + port
 	tunnelClientTTL = 90 * time.Second // a client is reachable this long after its last packet
 	tunnelMaxPPS    = 600              // per sender, packets a second
 	tunnelMaxPeers  = 20000
