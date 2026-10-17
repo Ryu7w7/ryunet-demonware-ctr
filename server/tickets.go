@@ -16,9 +16,20 @@ type issuedTicket struct {
 	id     playerID
 }
 
+// issuedRef is one entry of issuedOrder: a tag and the time its ticket was issued.
+type issuedRef struct {
+	tag [8]byte
+	at  time.Time
+}
+
 var (
 	issuedMu      sync.RWMutex
 	issuedTickets = map[[8]byte]issuedTicket{}
+	// issuedOrder holds the tags in the order they were issued. The map keeps a day of
+	// logins (hundreds of thousands of tickets): pruning and the lobby's fallback walk only
+	// the oldest or the newest entries of this queue instead of scanning the whole map under
+	// the lock, which made every login wait seconds on a busy server.
+	issuedOrder []issuedRef
 )
 
 // ticketWindow: tickets must be used to connect within this duration.
@@ -45,12 +56,34 @@ func ticketIssuedAt(ticket []byte) time.Time {
 func rememberTicket(ticket []byte, id playerID, now time.Time, window time.Duration) {
 	issuedMu.Lock()
 	defer issuedMu.Unlock()
-	for tag, t := range issuedTickets {
-		if now.Sub(ticketIssuedAt(t.ticket)) >= window+issuedIdentityGrace {
-			delete(issuedTickets, tag)
+	for len(issuedOrder) > 0 && now.Sub(issuedOrder[0].at) >= window+issuedIdentityGrace {
+		old := issuedOrder[0]
+		issuedOrder = issuedOrder[1:]
+		// The same tag issued again later is a newer ticket: keep it.
+		if t, ok := issuedTickets[old.tag]; ok && ticketIssuedAt(t.ticket).Equal(old.at) {
+			delete(issuedTickets, old.tag)
 		}
 	}
-	issuedTickets[ticketTag(ticket)] = issuedTicket{ticket: append([]byte(nil), ticket...), id: id}
+	tag := ticketTag(ticket)
+	issuedTickets[tag] = issuedTicket{ticket: append([]byte(nil), ticket...), id: id}
+	issuedOrder = append(issuedOrder, issuedRef{tag: tag, at: ticketIssuedAt(ticket)})
+}
+
+// recentIssuedTickets returns the tickets issued less than window ago, newest first, with
+// their tags.
+func recentIssuedTickets(now time.Time, window time.Duration) ([][8]byte, [][]byte) {
+	issuedMu.RLock()
+	defer issuedMu.RUnlock()
+	var tags [][8]byte
+	var tickets [][]byte
+	for i := len(issuedOrder) - 1; i >= 0 && now.Sub(issuedOrder[i].at) < window; i-- {
+		ref := issuedOrder[i]
+		if t, ok := issuedTickets[ref.tag]; ok && ticketIssuedAt(t.ticket).Equal(ref.at) {
+			tags = append(tags, ref.tag)
+			tickets = append(tickets, t.ticket)
+		}
+	}
+	return tags, tickets
 }
 
 // issuedTicketPlayer checks if the ticket was issued by this server within window and has valid identity.

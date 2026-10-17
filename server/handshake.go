@@ -306,19 +306,12 @@ func (l *lobbyConn) candidates(raw []byte) iter.Seq[keyCand] {
 		if t := findTicket(raw); t != nil && !emit("ticket-0x82", t) {
 			return
 		}
-		// Copy under the lock: deriving keys while holding it would stall auth.
-		issuedMu.RLock()
-		mem := make([][]byte, 0, len(issuedTickets))
-		names := make([]string, 0, len(issuedTickets))
-		for tag, it := range issuedTickets {
-			if len(it.ticket) == 128 {
-				mem = append(mem, it.ticket)
-				names = append(names, fmt.Sprintf("mem_%x", tag[:4]))
-			}
-		}
-		issuedMu.RUnlock()
+		// Only the tickets of the last ticketWindow, the time a ticket has to reach the lobby:
+		// memory keeps a day of them for identities, and copying all of them on a handshake
+		// held the lock long enough to stall every login.
+		tags, mem := recentIssuedTickets(time.Now(), ticketWindow)
 		for i, t := range mem {
-			if !emit(names[i], t) {
+			if len(t) == 128 && !emit(fmt.Sprintf("mem_%x", tags[i][:4]), t) {
 				return
 			}
 		}
